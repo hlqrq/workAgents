@@ -6,13 +6,17 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.nio.file.Paths;
+import java.util.Arrays;
 import java.util.Properties;
+import java.nio.file.Files;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.genai.Client;
 import com.google.genai.types.Content;
 import com.google.genai.types.File;
+import com.google.genai.types.GenerateContentConfig;
 import com.google.genai.types.GenerateContentResponse;
 import com.google.genai.types.Part;
 import com.google.genai.types.UploadFileConfig;
@@ -21,6 +25,8 @@ import com.microsoft.playwright.Page;
 import com.microsoft.playwright.options.LoadState;
 
 public class PodCastUtil {
+
+    static String GEMINI_API_KEY = "";
 
     public static String getChromeWsEndpoint(int port) {
         try {
@@ -127,14 +133,9 @@ public class PodCastUtil {
         }   
 
 
-    public static String generateSummaryWithGemini(java.io.File pdfFile) 
-    {
-        String GEMINI_API_KEY = "";
-        String responseText = "";
-
-        try 
+    public static void initGeminiClient() {
+        if (GEMINI_API_KEY.equals(""))
         {
-
             Properties props = new Properties();
             try (InputStream input = PodCastUtil.class.getClassLoader().getResourceAsStream("podcast.cfg")) {
                 if (input == null) {
@@ -149,6 +150,86 @@ public class PodCastUtil {
             }
 
             GEMINI_API_KEY = props.getProperty("GEMINI_API_KEY");
+        }
+    }
+
+
+    public static void generateImageWithGemini(String fileString, String outputDirectory) {
+
+            initGeminiClient();
+
+            try (Client client =Client.builder().apiKey(GEMINI_API_KEY).build();) {
+
+            GenerateContentConfig config = GenerateContentConfig.builder()
+                .responseModalities(Arrays.asList("IMAGE"))
+                .build();
+
+            File uploadedFile = client.files.upload(
+                fileString,
+                UploadFileConfig.builder()
+                    .mimeType("application/text") // 设置正确的 MIME 类型 (如 image/jpeg, application/pdf 等)
+                    .build()
+                );
+
+                Content content = Content.fromParts(
+                    Part.fromText("针对这份播客摘要，生成一张图片，图片中包含摘要中的核心知识点"), // 文本部分
+                    Part.fromUri(uploadedFile.uri().get(), uploadedFile.mimeType().get()) // 文件部分
+                );
+
+                GenerateContentResponse response = client.models.generateContent(
+                    "gemini-3-pro-image-preview",
+                    content,
+                    config);
+
+                for (Part part : response.parts()) 
+                {
+                    if (part.text().isPresent()) {
+                        System.out.println(part.text().get());
+                    } 
+                    else if (part.inlineData().isPresent()) {
+
+                        try 
+                        {
+                            var blob = part.inlineData().get();
+                            if (blob.data().isPresent()) {
+                                // 确保输出目录存在
+                                java.nio.file.Path outputDirPath = Paths.get(outputDirectory);
+                                if (!Files.exists(outputDirPath)) {
+                                    Files.createDirectories(outputDirPath);
+                                    System.out.println("创建输出目录: " + outputDirectory);
+                                }
+                                
+                                // 生成唯一的文件名
+                                String timestamp = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
+                                String originalFileName = Paths.get(fileString).getFileName().toString().replaceFirst("\\.[^.]+$", "");
+                                String imageFileName = String.format("%s_%s_generated_image.png", originalFileName, timestamp);
+                                
+                                // 构建完整的文件路径
+                                java.nio.file.Path imageFilePath = outputDirPath.resolve(imageFileName);
+                                
+                                // 写入图片文件
+                                Files.write(imageFilePath, blob.data().get());
+                                System.out.println("图片生成成功: " + imageFilePath);
+                            }
+                        }
+                        catch (IOException ex) {
+                            System.out.println("写入图片文件失败: " + ex.getMessage());
+                            ex.printStackTrace();
+                        }
+                    }
+                }
+        }
+
+    }
+
+    public static String generateSummaryWithGemini(java.io.File pdfFile) 
+    {
+        
+        String responseText = "";
+
+        try 
+        {
+            initGeminiClient();
 
             Client client = Client.builder()
             .apiKey(GEMINI_API_KEY)
@@ -167,7 +248,8 @@ public class PodCastUtil {
 
             // 3. 构建请求内容 (文本 + 文件)
             Content content = Content.fromParts(
-                Part.fromText("针对这个播客的内容，生成一份中文摘要，提炼核心的知识点，可以适当的拓展一些知识丰富摘要"), // 文本部分
+                Part.fromText("针对这个播客的内容，首先可以去掉很多寒暄，日常聊天，以及一些无关紧要的内容；然后根据对话，提炼出一些重点知识点，或者话题；"+
+                "最后根据这些知识点和话题，适当的补充一些专业词汇的介绍，生成一份中文摘要"), // 文本部分
                 Part.fromUri(uploadedFile.uri().get(), uploadedFile.mimeType().get()) // 文件部分
             );
 

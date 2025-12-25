@@ -26,17 +26,19 @@ import com.microsoft.playwright.options.LoadState;
  */
 public class PodwiseAutoMan {
 
-    private final static String DownloadDir = "/Users/cenwenchu/Desktop/podItems/";
-    private final static int MaxProcessCount = 40;
+    public final static String DownloadDir = "/Users/cenwenchu/Desktop/podItems/";
+
+    private final static int MaxProcessCount = 10;
+    private final static int ProcessSummaryCount = 1;
 
 
 	public static void main(String[] args) {
 
         // 执行自动化操作
-        new PodwiseAutoMan().connectAndAutomate();
+        //new PodwiseAutoMan().connectAndAutomate();
 
         //对于下载的文件，通过调用gemini的api来做翻译和中文摘要
-        //new PodwiseAutoMan().processDownloadedFiles();
+        new PodwiseAutoMan().processDownloadedFiles(ProcessSummaryCount,true);
 		
 	}
 
@@ -404,7 +406,7 @@ public class PodwiseAutoMan {
                                                     newDownloadBtn.click(); // 替换为实际的下载按钮选择器
                                                 });
 
-                                                downloadPath = DownloadDir + "CN/" + item.channelName + "_" + item.title + ".pdf"; // 指定完整路径和文件名
+                                                downloadPath = DownloadDir + "CN/CN_" + item.channelName + "_" + item.title + ".pdf"; // 指定完整路径和文件名
                                                 download.saveAs(Paths.get(downloadPath));
 
                                                 System.out.println("中文保存路径: " + downloadPath);
@@ -502,7 +504,10 @@ public class PodwiseAutoMan {
         }
 	}
 
-    private void processDownloadedFiles() {
+    private void processDownloadedFiles(int count,boolean needGenerateImage) {
+
+        int processedCount = 0;
+
         try {
             // 确保下载目录存在
             java.io.File dir = new java.io.File(DownloadDir);
@@ -526,41 +531,55 @@ public class PodwiseAutoMan {
             System.out.println("找到 " + files.length + " 个 PDF 文件，开始生成中文摘要...");
             
             for (java.io.File pdfFile : files) {
+                if (processedCount >= count) {
+                    break;
+                }
+                
+                processedCount++;
+                
                 String pdfFileName = pdfFile.getName();
                 System.out.println("正在处理文件: " + pdfFileName);
                 
                 // 构建输出文件名：在 .pdf 前添加 .cn 后缀
-                String outputFileName = pdfFileName.replace(".pdf", "_cn_summary.pdf");
+                String outputFileName = pdfFileName.replace(".pdf", "_cn_summary.txt");
                 String outputFilePath = outputDir.getPath() + "/" + outputFileName;
                 
                 // 检查摘要文件是否已存在
                 java.io.File outputFile = new java.io.File(outputFilePath);
                 if (outputFile.exists()) {
                     System.out.println("摘要文件已存在，跳过: " + outputFileName);
-                    continue;
                 }
-                
-                try {
+                else
+                {
+                    try {
                     // 调用 Gemini API 生成中文摘要
-                    String summary = PodCastUtil.generateSummaryWithGemini(pdfFile);
-                    
-                    // 保存摘要到文件
-                    if (summary != null && !summary.isEmpty()) {
-                        try (java.io.FileWriter writer = new java.io.FileWriter(outputFilePath)) {
-                            writer.write(summary);
+                        String summary = PodCastUtil.generateSummaryWithGemini(pdfFile);
+                        
+                        // 保存摘要到文件
+                        if (summary != null && !summary.isEmpty()) {
+                            try (java.io.FileWriter writer = new java.io.FileWriter(outputFilePath)) {
+                                writer.write(summary);
+                            }
+                            System.out.println("成功生成摘要文件: " + outputFileName);
+                        } else {
+                            System.out.println("生成摘要失败，跳过: " + pdfFileName);
                         }
-                        System.out.println("成功生成摘要文件: " + outputFileName);
-                    } else {
-                        System.out.println("生成摘要失败，跳过: " + pdfFileName);
+
+                        // 添加适当的延迟，避免 API 调用过于频繁
+                        Thread.sleep(1000);
+                        
+                    } catch (Exception e) {
+                        System.out.println("处理文件时出错 " + pdfFileName + ": " + e.getMessage());
+                        e.printStackTrace();
                     }
-                    
-                    // 添加适当的延迟，避免 API 调用过于频繁
-                    Thread.sleep(2000);
-                    
-                } catch (Exception e) {
-                    System.out.println("处理文件时出错 " + pdfFileName + ": " + e.getMessage());
-                    e.printStackTrace();
                 }
+
+                if(needGenerateImage)
+                {
+                    // 调用 Gemini API 生成图片摘要
+                    PodCastUtil.generateImageWithGemini(outputFile.getAbsolutePath(),DownloadDir+"image/");
+                }
+
             }
             
             System.out.println("所有文件处理完成");
