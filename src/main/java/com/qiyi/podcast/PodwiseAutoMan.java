@@ -30,6 +30,8 @@ public class PodwiseAutoMan {
 
 	public static void main(String[] args) {
 
+        int processItemCount = 10;
+
         PodwiseAutoMan autoMan = new PodwiseAutoMan();
 
         // 执行自动化操作
@@ -38,17 +40,17 @@ public class PodwiseAutoMan {
         AddPodCastTask addPodCastTask = new AddPodCastTask(autoMan.browser);
 
         // 从本地文件中读取播客列表
-        String[] podCastNames = PodCastUtil.readPodCastNamesFromFile("/Users/cenwenchu/Desktop/podcasts.txt");
-        addPodCastTask.addPodCast(podCastNames);
+        //String[] podCastNames = PodCastUtil.readPodCastNamesFromFile("/Users/cenwenchu/Desktop/podcasts.txt");
+        //addPodCastTask.addPodCast(podCastNames);
 
-        // DownLoadPodCastTask downLoadPodCastTask = new DownLoadPodCastTask(autoMan.browser);
-        // downLoadPodCastTask.performAutomationDownloadTasks(10);
+         DownLoadPodCastTask downLoadPodCastTask = new DownLoadPodCastTask(autoMan.browser);
+         downLoadPodCastTask.performAutomationDownloadTasks(processItemCount,5);
 
-        // //对于下载的文件，通过调用gemini的api来做翻译和中文摘要
-        // downLoadPodCastTask.processDownloadedFiles(1,ModelType.ALL,false);
+         autoMan.disconnectBrowser();
 
-        autoMan.disconnectBrowser();
-		
+         //对于下载的文件，通过调用gemini的api来做翻译和中文摘要
+         downLoadPodCastTask.processDownloadedFiles(2,ModelType.ALL,true);
+
 	}
 
     public void connectAndAutomate() {

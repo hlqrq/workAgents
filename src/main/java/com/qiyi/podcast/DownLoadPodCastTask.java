@@ -32,7 +32,7 @@ public class DownLoadPodCastTask {
         this.browser = browser;
     }
 
-    public void performAutomationDownloadTasks(int maxprocessCount) {
+    public void performAutomationDownloadTasks(int maxprocessCount,int maxTryTimes) {
 
         if (browser == null) {
             System.out.println("浏览器未连接，请先连接浏览器");
@@ -64,7 +64,7 @@ public class DownLoadPodCastTask {
             // 点击libaray
             ElementHandle libraryButton = page.waitForSelector(
                 "//div/span[contains(text(),'Library')]", 
-                new Page.WaitForSelectorOptions().setTimeout(10000)
+                new Page.WaitForSelectorOptions().setTimeout(60000)
             );
             
             if (libraryButton != null) {
@@ -73,7 +73,7 @@ public class DownLoadPodCastTask {
 
 				ElementHandle followingBtn = page.waitForSelector(
                 	"//div/button[contains(text(),'Following')]", 
-                	new Page.WaitForSelectorOptions().setTimeout(10000)
+                	new Page.WaitForSelectorOptions().setTimeout(60000)
             	);
 
 				if (followingBtn !=  null)
@@ -89,9 +89,9 @@ public class DownLoadPodCastTask {
 
 				   page.waitForSelector(
         						preciseXpath,
-        					new Page.WaitForSelectorOptions().setTimeout(10000));
+        					new Page.WaitForSelectorOptions().setTimeout(60000));
 
-                    processNodeList(itemList,itemNameList,page,preciseXpath,maxprocessCount);
+                    processNodeList(itemList,itemNameList,page,preciseXpath,maxprocessCount,maxTryTimes);
 
 					downloadPodcasts(itemList,context,true);
 				}
@@ -130,18 +130,22 @@ public class DownLoadPodCastTask {
 
 
     private void processNodeList(List<PodCastItem> itemList,List<String> itemNameList,
-                                        Page page,String preciseXpath,int maxprocessCount)
+                                        Page page,String preciseXpath,int maxprocessCount,int maxTryTimes)
     {
 
         int processCount = 0;
         int tryTimes = 0;
+        int validItemCount = 0;
 
         List<ElementHandle> elements = page.querySelectorAll(preciseXpath);
 
         do{
             
+            System.out.println("elements.size:" + elements.size() + "processCount:" + processCount + ",tryTimes:" + tryTimes);
+
             if (elements.size() > processCount)
             {
+                tryTimes = 0;
                 // 遍历所有元素
                 for (int i = processCount; i < elements.size(); i++) {
                     ElementHandle element = elements.get(i);
@@ -167,11 +171,27 @@ public class DownLoadPodCastTask {
 
                     if (!itemNameList.contains(item.title))
                     {
-                        itemList.add(item);
+                        if (item.isProcessed)
+                        {
+                            validItemCount += 1;
 
-                        itemNameList.add(item.title);
+                            itemList.add(item);
 
-                        System.out.println("new item: " + item.channelName +  "," + item.title +  "," + item.linkString+ "," + item.isProcessed); 
+                            itemNameList.add(item.title);
+
+                            System.out.println("有效的item: " + item.channelName +  "," + item.title +  "," + item.linkString+ "," + item.isProcessed); 
+
+                            if(validItemCount >= maxprocessCount)
+                            {
+                                System.out.println("已处理" + validItemCount + "个有效item，准备下载");
+                                break;
+                            }
+                        }
+                        else
+                        {
+                            System.out.println("未被分析的item: " + item.channelName +  "," + item.title); 
+                        }
+                        
                     }
                     else
                     {
@@ -185,6 +205,10 @@ public class DownLoadPodCastTask {
             }
             else{
                 tryTimes += 1;
+            }
+
+            if (validItemCount >= maxprocessCount) {
+                break;
             }
 
             ElementHandle element = elements.get(elements.size() - 1);
@@ -207,7 +231,7 @@ public class DownLoadPodCastTask {
                 // 优化：使用更宽松的加载状态，并设置超时时间
                 try {                  
                     // 然后等待特定元素出现（使用原来的XPath选择器），表示新内容已加载
-                    page.waitForSelector(preciseXpath, new Page.WaitForSelectorOptions().setTimeout(3000));
+                    page.waitForSelector(preciseXpath, new Page.WaitForSelectorOptions().setTimeout(60000));
                     
                     System.out.println("下拉滚动完成，页面已加载新内容");
                 } catch (Exception e) {
@@ -226,7 +250,7 @@ public class DownLoadPodCastTask {
                 System.out.println("滚动操作时出错: " + e.getMessage());
                 e.printStackTrace();
             }
-        } while (tryTimes <= 3 && processCount < maxprocessCount) ;
+        } while (tryTimes <= maxTryTimes && validItemCount < maxprocessCount) ;
         
     }
 
@@ -329,7 +353,7 @@ public class DownLoadPodCastTask {
                                                 {
                                                     cnBtn = downloadPage.waitForSelector(
                                                     "//button[span[contains(text(),'简体中文')] and span[contains(text(),'Select')]]",
-                                                        new Page.WaitForSelectorOptions().setTimeout(5*60*1000));    
+                                                        new Page.WaitForSelectorOptions().setTimeout(15*60*1000));    
                                                         
                                                     cnBtn.click();
                                                     isCnTranslated = true;

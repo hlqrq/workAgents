@@ -250,6 +250,7 @@ public class PodCastUtil {
             .baseUrl("https://api.deepseek.com")
             .model("deepseek-chat")
             .connectTimeout(java.time.Duration.ofSeconds(30))
+            .readTimeout(java.time.Duration.ofSeconds(600))
             .logRequests(true)                          // 开启请求日志
             .logResponses(true)                         // 开启响应日志
             .build();
