@@ -40,6 +40,10 @@ public class PodCastUtil {
     static String GEMINI_API_KEY = "";
     static String DEEPSEEK_API_KEY = "";
 
+    static String summaryPrompt = "针对这个播客的内容，首先可以去掉很多寒暄，日常聊天，以及一些无关紧要的内容；然后根据对话，提炼出一些重点知识点，或者话题；"+
+                            "最后根据这些知识点和话题，适当的补充一些专业词汇的介绍，生成一份中文摘要；中文摘要后面，增加对于整个播客优质对话的摘录，作为原文亮点，不用在意输出内容的长度，只要好的对话内容，就保留。"
+                            +"直接输出摘要，不要有其他的回复信息。播客文字内容如下：";
+    static String imagePrompt = "针对这份播客摘要，生成一张图片，图片中包含摘要中的核心知识点";
 
     public static String getChromeWsEndpoint(int port) {
         try {
@@ -186,7 +190,7 @@ public class PodCastUtil {
                 );
 
                 Content content = Content.fromParts(
-                    Part.fromText("针对这份播客摘要，生成一张图片，图片中包含摘要中的核心知识点"), // 文本部分
+                    Part.fromText(imagePrompt), // 文本部分
                     Part.fromUri(uploadedFile.uri().get(), uploadedFile.mimeType().get()) // 文件部分
                 );
 
@@ -259,8 +263,7 @@ public class PodCastUtil {
             String pdfContent = readFileContent(pdfFile);
 
             UserMessage userMessage = UserMessage.builder()
-                        .addText("针对这个播客的内容，首先可以去掉很多寒暄，日常聊天，以及一些无关紧要的内容；然后根据对话，提炼出一些重点知识点，或者话题；"+
-                            "最后根据这些知识点和话题，适当的补充一些专业词汇的介绍，生成一份中文摘要，直接输出摘要，不要有其他的回复信息。播客文字内容如下：")
+                        .addText(summaryPrompt)
                         .addText(pdfContent).build();
 
             ChatCompletionRequest request = ChatCompletionRequest.builder()
@@ -334,8 +337,7 @@ public class PodCastUtil {
 
             // 3. 构建请求内容 (文本 + 文件)
             Content content = Content.fromParts(
-                Part.fromText("针对这个播客的内容，首先可以去掉很多寒暄，日常聊天，以及一些无关紧要的内容；然后根据对话，提炼出一些重点知识点，或者话题；"+
-                "最后根据这些知识点和话题，适当的补充一些专业词汇的介绍，生成一份中文摘要"), // 文本部分
+                Part.fromText(summaryPrompt), // 文本部分
                 Part.fromUri(uploadedFile.uri().get(), uploadedFile.mimeType().get()) // 文件部分
             );
 

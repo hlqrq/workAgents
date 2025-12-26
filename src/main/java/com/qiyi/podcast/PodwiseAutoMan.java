@@ -39,6 +39,7 @@ public class PodwiseAutoMan {
 
     //两个模型枚举
     public enum ModelType {
+        ALL,
         DEEPSEEK,
         GEMINI
     }
@@ -54,7 +55,7 @@ public class PodwiseAutoMan {
         autoMan.performAutomationDownloadTasks();
 
         //对于下载的文件，通过调用gemini的api来做翻译和中文摘要
-        autoMan.processDownloadedFiles(PROCESS_SUMMARY_COUNT,ModelType.DEEPSEEK,false);
+        autoMan.processDownloadedFiles(PROCESS_SUMMARY_COUNT,ModelType.ALL,false);
 
         autoMan.disconnectBrowser();
 		
@@ -579,6 +580,15 @@ public class PodwiseAutoMan {
                         else if(modelType == ModelType.DEEPSEEK)
                         {
                             summary = PodCastUtil.generateSummaryWithDeepSeek(pdfFile);
+                        }
+                        else if(modelType == ModelType.ALL)
+                        {
+                            summary = "-- DeepSeek摘要 --\n";
+                            summary += PodCastUtil.generateSummaryWithDeepSeek(pdfFile);
+
+                            summary += "\n\n\n\n";
+                            summary += "-- Gemini 摘要 --\n";
+                            summary += PodCastUtil.generateSummaryWithGemini(pdfFile);
                         }
                         
                         // 保存摘要到文件
