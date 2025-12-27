@@ -32,7 +32,7 @@ public class DownLoadPodCastTask {
         this.browser = browser;
     }
 
-    public void performAutomationDownloadTasks(int maxprocessCount,int maxTryTimes) {
+    public void performAutomationDownloadTasks(int maxprocessCount,int maxTryTimes,boolean onlyReadReadyPodCast) {
 
         if (browser == null) {
             System.out.println("浏览器未连接，请先连接浏览器");
@@ -78,6 +78,19 @@ public class DownLoadPodCastTask {
 
 				if (followingBtn !=  null)
 				{
+                    if (onlyReadReadyPodCast)
+                    {
+                        // 方法1: 通过按钮文本内容定位
+                        page.locator("button:has-text('All')").click();
+                        
+                        // 等待下拉选项出现
+                        page.waitForSelector("div[role='option']:has-text('ready')");
+                        
+                        // 选择 ready 选项
+                        page.locator("div[role='option']:has-text('ready')").click();
+                    }
+
+
 					followingBtn.evaluate("node => node.click()");
 					
 					String preciseXpath = """
@@ -456,7 +469,7 @@ public class DownLoadPodCastTask {
         }
 	}
 
-    public void processDownloadedFiles(int maxProcessCount,ModelType modelType,boolean needGenerateImage) {
+    public void processDownloadedFiles(int maxProcessCount,ModelType modelType,boolean needGenerateImage,boolean isStreamingProcess) {
 
         int processedCount = 0;
 
@@ -512,11 +525,11 @@ public class DownLoadPodCastTask {
                                 summary = PodCastUtil.generateSummaryWithGemini(pdfFile,summaryPrompt);
                                 break;
                             case DEEPSEEK:
-                                summary = PodCastUtil.generateSummaryWithDeepSeek(pdfFile,summaryPrompt);
+                                summary = PodCastUtil.generateSummaryWithDeepSeek(pdfFile,summaryPrompt,isStreamingProcess);
                                 break;
                             case ALL:
                                 summary = "-- DeepSeek摘要 --\n";
-                                summary += PodCastUtil.generateSummaryWithDeepSeek(pdfFile,summaryPrompt);
+                                summary += PodCastUtil.generateSummaryWithDeepSeek(pdfFile,summaryPrompt,isStreamingProcess);
                                 summary += "\n\n\n\n";
                                 summary += "-- Gemini 摘要 --\n";
                                 summary += PodCastUtil.generateSummaryWithGemini(pdfFile,summaryPrompt);

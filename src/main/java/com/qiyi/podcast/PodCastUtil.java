@@ -12,6 +12,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Properties;
+import java.util.concurrent.CountDownLatch;
 
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
@@ -37,6 +38,8 @@ import io.github.pigmesh.ai.deepseek.core.OpenAiClient.OpenAiClientContext;
 import io.github.pigmesh.ai.deepseek.core.chat.ChatCompletionRequest;
 import io.github.pigmesh.ai.deepseek.core.chat.ChatCompletionResponse;
 import io.github.pigmesh.ai.deepseek.core.chat.UserMessage;
+import io.github.pigmesh.ai.deepseek.core.shared.StreamOptions;
+import reactor.core.publisher.Flux;
 
 public class PodCastUtil {
 
@@ -239,13 +242,84 @@ public class PodCastUtil {
     }
 
 
-    public static String generateSummaryWithDeepSeek(java.io.File pdfFile,String summaryPrompt) 
+    
+
+
+    public static String generateSummaryWithDeepSeek(java.io.File pdfFile,String summaryPrompt,boolean isStreamingProcess) throws IOException 
     {
         String responseText = "";
 
         initClientConfig();
 
-        DeepSeekClient deepseekClient = new DeepSeekClient.Builder()
+        String pdfContent = readFileContent(pdfFile);
+
+        UserMessage userMessage = UserMessage.builder()
+                    .addText(summaryPrompt)
+                    .addText(pdfContent).build();
+
+        if (isStreamingProcess)
+        {
+            DeepSeekClient deepseekClient = new DeepSeekClient.Builder()
+            .openAiApiKey(DEEPSEEK_API_KEY)
+            .baseUrl("https://api.deepseek.com")
+            .model("deepseek-chat")
+            .logStreamingResponses(true)                        // 开启响应日志
+            .build();
+
+            StringBuilder sb = new StringBuilder();
+            CountDownLatch latch = new CountDownLatch(1);
+
+            try
+            {
+                ChatCompletionRequest request = ChatCompletionRequest.builder()
+                .model("deepseek-chat")
+                .messages(userMessage)
+                .stream(true)  // 启用流式
+                .streamOptions(StreamOptions.builder().includeUsage(true).build())
+                .build();
+        
+                System.out.println("开始流式响应...\n");
+                Flux<ChatCompletionResponse> flux = deepseekClient.chatFluxCompletion(request);
+
+                flux.subscribe(
+                    chunk -> {
+                        // 处理每个流式块
+                        if (chunk.choices() != null && !chunk.choices().isEmpty()) {
+                            String delta = chunk.choices().get(0).delta().content();
+                            if (delta != null) {
+                                sb.append(delta);
+                            }
+                        }
+                    },
+                    error -> {
+                        System.err.println("\n流式错误: " + error.getMessage());
+                        latch.countDown();
+                    },
+                    () -> {
+                        System.out.println("\n\n流式响应完成！");
+                        latch.countDown();
+                    }
+                );
+
+                latch.await();
+            }
+            catch (Exception ex) {
+                System.out.println("调用 DeepSeek API 失败: " + ex.getMessage());
+                ex.printStackTrace();
+            }
+            finally {
+                deepseekClient.shutdown();
+            }
+
+            responseText = sb.toString();
+
+            System.out.println("\n=== DeepSeek 回答 ===");
+            System.out.println(responseText);
+
+        }
+        else
+        {
+            DeepSeekClient deepseekClient = new DeepSeekClient.Builder()
             .openAiApiKey(DEEPSEEK_API_KEY)
             .baseUrl("https://api.deepseek.com")
             .model("deepseek-chat")
@@ -255,44 +329,38 @@ public class PodCastUtil {
             .logResponses(true)                         // 开启响应日志
             .build();
 
-        try
-        {
+            try
+            {
+                ChatCompletionRequest request = ChatCompletionRequest.builder()
+                        .messages(userMessage).build();
 
-            String pdfContent = readFileContent(pdfFile);
+                ChatCompletionResponse response = deepseekClient
+                    .chatCompletion(new OpenAiClientContext(), request)
+                    .execute();
 
-            UserMessage userMessage = UserMessage.builder()
-                        .addText(summaryPrompt)
-                        .addText(pdfContent).build();
-
-            ChatCompletionRequest request = ChatCompletionRequest.builder()
-                    .messages(userMessage).build();
-
-            ChatCompletionResponse response = deepseekClient
-                .chatCompletion(new OpenAiClientContext(), request)
-                .execute();
-
-            // 4. 处理响应
-            if (response != null && response.choices() != null && !response.choices().isEmpty()) {
-                responseText = response.choices().get(0).message().content();
-                System.out.println("\n=== DeepSeek 回答 ===");
-                System.out.println(responseText);
-                
-                // 打印使用统计
-                System.out.println("\n=== 使用统计 ===");
-                System.out.println("Prompt tokens: " + response.usage().promptTokens());
-                System.out.println("Completion tokens: " + response.usage().completionTokens());
-                System.out.println("Total tokens: " + response.usage().totalTokens());
+                // 4. 处理响应
+                if (response != null && response.choices() != null && !response.choices().isEmpty()) {
+                    responseText = response.choices().get(0).message().content();
+                    System.out.println("\n=== DeepSeek 回答 ===");
+                    System.out.println(responseText);
+                    
+                    // 打印使用统计
+                    System.out.println("\n=== 使用统计 ===");
+                    System.out.println("Prompt tokens: " + response.usage().promptTokens());
+                    System.out.println("Completion tokens: " + response.usage().completionTokens());
+                    System.out.println("Total tokens: " + response.usage().totalTokens());
+                }
+                else {
+                    System.out.println("未收到有效响应");
+                }
             }
-            else {
-                System.out.println("未收到有效响应");
+            catch (Exception ex) {
+                System.out.println("调用 DeepSeek API 失败: " + ex.getMessage());
+                ex.printStackTrace();
             }
-        }
-        catch (Exception ex) {
-            System.out.println("调用 DeepSeek API 失败: " + ex.getMessage());
-            ex.printStackTrace();
-        }
-        finally {
-            deepseekClient.shutdown();
+            finally {
+                deepseekClient.shutdown();
+            }
         }
         
         return responseText;

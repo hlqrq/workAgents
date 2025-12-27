@@ -37,19 +37,19 @@ public class PodwiseAutoMan {
         // 执行自动化操作
         autoMan.connectAndAutomate();
 
-        AddPodCastTask addPodCastTask = new AddPodCastTask(autoMan.browser);
 
-        // 从本地文件中读取播客列表
+        // 从本地文件中读取播客列表,并且搜索和关注这些播客
+        //AddPodCastTask addPodCastTask = new AddPodCastTask(autoMan.browser);
         //String[] podCastNames = PodCastUtil.readPodCastNamesFromFile("/Users/cenwenchu/Desktop/podcasts.txt");
         //addPodCastTask.addPodCast(podCastNames);
 
          DownLoadPodCastTask downLoadPodCastTask = new DownLoadPodCastTask(autoMan.browser);
-         downLoadPodCastTask.performAutomationDownloadTasks(processItemCount,5);
-
-         autoMan.disconnectBrowser();
+         //downLoadPodCastTask.performAutomationDownloadTasks(processItemCount,5,true);
 
          //对于下载的文件，通过调用gemini的api来做翻译和中文摘要
-         downLoadPodCastTask.processDownloadedFiles(2,ModelType.ALL,true);
+         downLoadPodCastTask.processDownloadedFiles(2,ModelType.ALL,false,true);
+
+         autoMan.disconnectBrowser();
 
 	}
 
