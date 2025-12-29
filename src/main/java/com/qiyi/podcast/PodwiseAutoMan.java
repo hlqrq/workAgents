@@ -40,10 +40,32 @@ public class PodwiseAutoMan {
         int downloadMaxProcessCount = 0;
 
         // 从main入参读取上面的几个参数，支持提示后输入
-        if (args.length >= 4) {
+        if (args.length >= 3) {
             maxProcessCount = Integer.parseInt(args[0]);
             maxTryTimes = Integer.parseInt(args[1]);
             downloadMaxProcessCount = Integer.parseInt(args[2]);
+        } else {
+            java.util.Scanner scanner = new java.util.Scanner(System.in);
+            
+            System.out.println("请输入参数 (直接回车使用默认值):");
+            
+            System.out.print("请输入 maxProcessCount (默认 " + maxProcessCount + "): ");
+            String input = scanner.nextLine();
+            if (!input.trim().isEmpty()) {
+                maxProcessCount = Integer.parseInt(input.trim());
+            }
+
+            System.out.print("请输入 maxTryTimes (默认 " + maxTryTimes + "): ");
+            input = scanner.nextLine();
+            if (!input.trim().isEmpty()) {
+                maxTryTimes = Integer.parseInt(input.trim());
+            }
+
+            System.out.print("请输入 downloadMaxProcessCount (默认 " + downloadMaxProcessCount + "): ");
+            input = scanner.nextLine();
+            if (!input.trim().isEmpty()) {
+                downloadMaxProcessCount = Integer.parseInt(input.trim());
+            }
         }
 
         // 执行自动化操作
