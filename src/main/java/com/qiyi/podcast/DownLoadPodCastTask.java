@@ -1,6 +1,7 @@
 package com.qiyi.podcast;
 
 import java.io.File;
+import java.io.FileWriter;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
@@ -11,566 +12,650 @@ import com.microsoft.playwright.Download;
 import com.microsoft.playwright.ElementHandle;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.options.LoadState;
+
 import com.qiyi.podcast.PodwiseAutoMan.ModelType;
 
 public class DownLoadPodCastTask {
 
-    public  String DOWNLOAD_DIR = "/Users/cenwenchu/Desktop/podcastItems/";
-    public  String DOWNLOAD_DIR_CN = DOWNLOAD_DIR + "CN/";
-    public  String DOWNLOAD_DIR_SUMMARY = DOWNLOAD_DIR + "summary/";
-    public  String DOWNLOAD_DIR_IMAGE = DOWNLOAD_DIR + "Image/";
+    // Constants
+    private static final String DEFAULT_DOWNLOAD_DIR = "/Users/cenwenchu/Desktop/podCastItems/";
+    private static final int DEFAULT_TIMEOUT_MS = 60000;
+    private static final int SHORT_TIMEOUT_MS = 5000;
 
-    static String summaryPrompt = "针对这个播客的内容，首先可以去掉很多寒暄，日常聊天，以及一些无关紧要的内容；然后根据对话，提炼出一些重点知识点，或者话题；"+
-                            "最后根据这些知识点和话题，适当的补充一些专业词汇的介绍，生成一份中文摘要；中文摘要后面，增加对于整个播客优质对话的摘录，作为原文亮点，不用在意输出内容的长度，只要好的对话内容，就保留。"
-                            +"直接输出摘要，不要有其他的回复信息。播客文字内容如下：";
-    static String imagePrompt = "针对这份播客摘要，生成一张图片，图片中包含摘要中的核心知识点";
+    // Prompts
+    private static final String SUMMARY_PROMPT = "你是一位顶级的播客内容策略师，擅长同时进行**精准的传播提炼**与**深度的结构分析**。\n" + //
+                        "\n" + //
+                        "请基于我提供的播客文本，**同时、独立地**生成以下两部分内容。两部分应直接、并行地从原始对话中提取信息，**无需相互依赖或参考**。\n" + //
+                        "\n" + //
+                        "---\n" + //
+                        "\n" + //
+                        "### **第一部分：传播导读卡片 (Part A) | 目标：快速吸引与传播**\n" + //
+                        "**角色**：你是社交媒体上的资深内容编辑，善于制造话题和提炼亮点。\n" + //
+                        "**核心任务**：制作一份能让读者在60秒内被吸引并理解核心价值的内容。\n" + //
+                        "**请按此框架创作**：\n" + //
+                        "1.  **【标题】**：设计一个引人好奇、包含矛盾或惊喜点的主标题（例如：“AI耗电怪兽如何变身电网‘充电宝’？”）。\n" + //
+                        "2.  **【一句话介绍】**：用一句话点明本期播客解决的**核心矛盾**或带来的**最大反转认知**。\n" + //
+                        "3.  **【核心摘要卡片（3-4张）】**：\n" + //
+                        "    *   **卡片结构**：\n" + //
+                        "        *   **🔥 洞察**：一个尖锐的观点或发现（例如：“电网的‘最坏情况’规划，正在浪费一个三峡电站的容量”）。\n" + //
+                        "        *   **💡 解读**：用最通俗的语言解释它意味着什么。\n" + //
+                        "        *   **🎙️ 原声**：截取一句最能佐证该洞察的嘉宾原话（注明发言人）。\n" + //
+                        "        *   **🚀 启发**：这对行业、政策或普通人有什么启示？\n" + //
+                        "4.  **【行动呼唤】**：在结尾提出一个供读者思考的问题，或建议一个简单的后续行动（如：“想想你的业务能否借鉴这种‘灵活性’思维？”）。\n" + //
+                        "\n" + //
+                        "**语言风格**：精炼、有网感、带节奏，可直接用于社交媒体。\n" + //
+                        "\n" + //
+                        "---\n" + //
+                        "\n" + //
+                        "### **第二部分：深度分析报告 (Part B) | 目标：深度理解与存档**\n" + //
+                        "**角色**：你是专注该领域的行业分析师或研究员。\n" + //
+                        "**核心任务**：生成一份结构清晰、信息完整、便于引用和存档的分析文档。\n" + //
+                        "**请按此结构撰写**：\n" + //
+                        "1.  **【报告摘要】**：用一段话（200-300字）概括核心问题、技术/商业模式解决方案、潜在影响及主要挑战。\n" + //
+                        "2.  **【逻辑图谱】**：以大纲形式，展示内容重构后的**核心逻辑链条**（例如：1. 问题本质 → 2. 可行性原理 → 3. 关键工具 → 4. 实施挑战 → 5. 未来愿景）。\n" + //
+                        "3.  **【主题深度剖析】**：\n" + //
+                        "    *   围绕逻辑图谱中的每个关键节点展开。\n" + //
+                        "    *   每个节点下，采用 **“观点 + 支撑（数据/案例）+ 原文引述”** 的三段式进行阐述。\n" + //
+                        "    *   在复杂或关键处，可插入【分析点】进行简短评注。\n" + //
+                        "4.  **【信息附录】**：\n" + //
+                        "    *   **术语表**：集中解释关键技术或商业术语。\n" + //
+                        "    *   **关键对话实录**：按主题归类，摘录5-8段完整、高质量的对话片段（含发言人）。\n" + //
+                        "\n" + //
+                        "**语言风格**：严谨、系统、客观，适合专业读者。\n" + //
+                        "\n" + //
+                        "---\n" + //
+                        "\n" + //
+                        "### **【最终输出格式与要求】**\n" + //
+                        "\n" + //
+                        "# 文章标题:《[根据内容自拟主题]》\n" + //
+                        "\n" + //
+                        "## Part A：传播导读卡片（快速传播版）\n" + //
+                        "（在此完整输出第一部分内容）\n" + //
+                        "\n" + //
+                        "---\n" + //
+                        "\n" + //
+                        "## Part B：深度分析报告（深度研究版）\n" + //
+                        "（在此完整输出第二部分内容）\n" + //
+                        "\n" + //
+                        "**通用处理原则（对A、B部分均适用）**：\n" + //
+                        "1.  **独立处理**：A、B两部分均需直接、独立地从原始文本中提取信息。\n" + //
+                        "2.  **严格过滤**：剔除所有寒暄、重复、跑题及琐碎的个人叙述。\n" + //
+                        "3.  **忠实原文**：所有观点、数据和引用必须源于文本，不可虚构。\n" + //
+                        "4.  **优化重组**：按逻辑而非时间顺序重新组织信息。\n" + //
+                        "\n" + //
+                        "现在，请处理以下播客文本：\n";
+    private static final String IMAGE_PROMPT = "针对这份播客摘要，生成一张图片，图片中包含摘要中的核心知识点";
+    private static final String RENAME_PROMPT = "你是一个专业的文件名翻译助手。我有一组播客文件名，格式为 'CN_{ChannelName}_{Title}.pdf'。请识别每个文件名中的 '{Title}' 部分，如果是英文，将其翻译成中文；如果是中文，保持不变。请按以下格式返回翻译结果：\n1. 识别 '{Title}' 并翻译。\n2. 新文件名**只保留翻译后的 Title**，去掉 'CN_' 前缀和 '{ChannelName}' 部分。\n3. 确保新文件名以 .pdf 结尾。\n\n返回格式（每行一个）：\n原始文件名=新的文件名\n\n文件名列表如下：\n";
 
-    Browser browser = null;
+    // Selectors
+    private static final String XPATH_LIBRARY = "//div/span[contains(text(),'Library')]";
+    private static final String XPATH_FOLLOWING = "//div/button[contains(text(),'Following')]";
+    private static final String XPATH_PODCAST_ITEM = "//div[./img[contains(@alt, 'Podcast Cover')] and .//a[contains(@href, 'dashboard')]]";
+    private static final String XPATH_READY_STATUS = "//div/span[contains(text(),'Ready')]";
+    private static final String SELECTOR_LOAD_MORE = "button:has-text('Load More')";
 
-    public DownLoadPodCastTask(Browser browser,String DownLoadSaveDir)
-    {
+    // Member variables
+    private Browser browser;
+    public String DOWNLOAD_DIR_TOP;
+    public String DOWNLOAD_DIR_ORIGINAL;
+    public String DOWNLOAD_DIR_CN;
+    public String DOWNLOAD_DIR_SUMMARY;
+    public String DOWNLOAD_DIR_IMAGE;
+    public String FILELIST_FILE;
+
+    public DownLoadPodCastTask(Browser browser, String downloadSaveDir) {
         this.browser = browser;
-        this.DOWNLOAD_DIR = DownLoadSaveDir;
-        this.DOWNLOAD_DIR_CN = DOWNLOAD_DIR + "CN/";
-        this.DOWNLOAD_DIR_SUMMARY = DOWNLOAD_DIR + "summary/";
-        this.DOWNLOAD_DIR_IMAGE = DOWNLOAD_DIR + "Image/";
+        this.DOWNLOAD_DIR_TOP = (downloadSaveDir != null) ? downloadSaveDir : DEFAULT_DOWNLOAD_DIR;
+        this.DOWNLOAD_DIR_ORIGINAL = this.DOWNLOAD_DIR_TOP + "original/";
+        this.DOWNLOAD_DIR_CN = this.DOWNLOAD_DIR_TOP + "cn/";
+        this.DOWNLOAD_DIR_SUMMARY = this.DOWNLOAD_DIR_TOP + "summary/";
+        this.DOWNLOAD_DIR_IMAGE = this.DOWNLOAD_DIR_TOP + "Image/";
+        this.FILELIST_FILE = this.DOWNLOAD_DIR_TOP + "filelist.txt";
     }
 
-    public void performAutomationDownloadTasks(int maxprocessCount,int maxTryTimes,boolean onlyReadReadyPodCast) {
-
+    /**
+     * 执行自动化下载任务
+     * 
+     * @param maxProcessCount 最大处理（下载）的播客数量
+     * @param maxTryTimes 列表加载最大重试次数
+     * @param onlyReadReadyPodCast 是否只处理状态为 Ready 的播客
+     * @param modelType 使用的模型类型（用于后续的文件名翻译等）
+     * @param maxBatchSize 批量重命名时的每批文件数量
+     */
+    public void performAutomationDownloadTasks(int maxProcessCount, int maxTryTimes, boolean onlyReadReadyPodCast, ModelType modelType, int maxBatchSize) {
         if (browser == null) {
-            System.out.println("浏览器未连接，请先连接浏览器");
+            log("浏览器未连接，请先连接浏览器");
             return;
         }
 
-        BrowserContext context = browser.contexts().isEmpty() ? 
-            browser.newContext() : browser.contexts().get(0);
-        
-        Page page;
-        page = context.newPage();
-        System.out.println("创建新页面");
-        
-        page.navigate("https://podwise.ai/dashboard/episodes");
-        
-        if (!PodCastUtil.isLoggedIn(page)) {
-            System.out.println("用户未登录，请手动登录后继续");
-            // 等待用户手动登录
-            PodCastUtil.waitForManualLogin(page);
-        }
-
-        List<PodCastItem> itemList = new ArrayList<>();
-        List<String> itemNameList = new ArrayList<>();
+        BrowserContext context = browser.contexts().isEmpty() ? browser.newContext() : browser.contexts().get(0);
+        Page page = context.newPage();
+        log("创建新页面");
 
         try {
-            //从本地文件夹载入已经处理过的item
-            loadProcessedItems(itemNameList); 
+            page.navigate("https://podwise.ai/dashboard/episodes");
 
-            // 点击libaray
-            ElementHandle libraryButton = page.waitForSelector(
-                "//div/span[contains(text(),'Library')]", 
-                new Page.WaitForSelectorOptions().setTimeout(60000)
-            );
-            
-            if (libraryButton != null) {
-                System.out.println("找到Library按钮: " + libraryButton);
-                libraryButton.click();
-
-				ElementHandle followingBtn = page.waitForSelector(
-                	"//div/button[contains(text(),'Following')]", 
-                	new Page.WaitForSelectorOptions().setTimeout(60000)
-            	);
-
-				if (followingBtn !=  null)
-				{
-                    if (onlyReadReadyPodCast)
-                    {
-                        // 方法1: 通过按钮文本内容定位
-                        page.locator("button:has-text('All')").click();
-                        
-                        // 等待下拉选项出现
-                        page.waitForSelector("div[role='option']:has-text('ready')");
-                        
-                        // 选择 ready 选项
-                        page.locator("div[role='option']:has-text('ready')").click();
-                    }
-
-
-					followingBtn.evaluate("node => node.click()");
-					
-					String preciseXpath = """
-                    //div[
-                       ./img[contains(@alt, 'Podcast Cover')] 
-                      and .//a[contains(@href, 'dashboard')]
-                    ]
-                  """;
-
-				   page.waitForSelector(
-        						preciseXpath,
-        					new Page.WaitForSelectorOptions().setTimeout(60000));
-
-                    processNodeList(itemList,itemNameList,page,preciseXpath,maxprocessCount,maxTryTimes);
-
-					downloadPodcasts(itemList,context,true);
-				}
+            if (!PodCastUtil.isLoggedIn(page)) {
+                log("用户未登录，请手动登录后继续");
+                PodCastUtil.waitForManualLogin(page);
             }
-            
-        } catch (Exception e) {
-            System.out.println("自动化任务出错: " + e.getMessage());
-        }
-    }
 
-    private void loadProcessedItems(List<String> itemNameList)
-    {
-        try {
-            // 从本地文件夹载入已经处理过的item
-            File folder = new File(DOWNLOAD_DIR);
+            List<PodCastItem> itemList = new ArrayList<>();
+            List<String> itemNameList = new ArrayList<>();
+
+            File folder = new File(DOWNLOAD_DIR_TOP);
             if (!folder.exists()) {
                 folder.mkdirs();
             }
-            else
-            {
-                //读取目录下所有文件,pdf类型的文件
-                File[] files = folder.listFiles();
-                if (files != null) {
-                    for (File file : files) {
-                        if (file.isFile() && file.getName().endsWith(".pdf") && file.getName().contains("_")) {
-                            itemNameList.add(file.getName().replace(".pdf", "").split("_")[1]);
-                        }
-                    }
+
+            loadProcessedItems(itemNameList);
+
+            if (navigateToFollowing(page)) {
+                if (onlyReadReadyPodCast) {
+                    filterReadyPodcasts(page);
+                }
+
+                // Wait for initial list
+                try {
+                    page.waitForSelector(XPATH_PODCAST_ITEM, new Page.WaitForSelectorOptions().setTimeout(DEFAULT_TIMEOUT_MS));
+                } catch (Exception e) {
+                    log("未找到任何播客条目");
+                }
+
+                if (!new File(FILELIST_FILE).exists()) {
+                    log("执行处理节点列表");
+                    processNodeList(itemList, itemNameList, page, XPATH_PODCAST_ITEM, maxProcessCount, maxTryTimes);
+                } else {
+                    log(FILELIST_FILE + " 文件列表文件已存在，跳过处理节点列表，直接进入文件下载流程");
+                }
+
+                downloadPodcasts(context, true, modelType);
+                
+                // Batch rename chinese files after all downloads
+                if (modelType != null) {
+                    batchRenameChineseFiles(modelType, maxBatchSize);
                 }
             }
 
         } catch (Exception e) {
-            System.out.println("读取已处理项文件时出错: " + e.getMessage());
+            log("自动化任务出错: " + e.getMessage());
+            e.printStackTrace();
+        } finally {
+            if (!page.isClosed()) page.close();
         }
     }
 
-
-    private void processNodeList(List<PodCastItem> itemList,List<String> itemNameList,
-                                        Page page,String preciseXpath,int maxprocessCount,int maxTryTimes)
-    {
-
-        int processCount = 0;
-        int tryTimes = 0;
-        int validItemCount = 0;
-
-        List<ElementHandle> elements = page.querySelectorAll(preciseXpath);
-
-        do{
-            
-            System.out.println("elements.size:" + elements.size() + "processCount:" + processCount + ",tryTimes:" + tryTimes);
-
-            if (elements.size() > processCount)
-            {
-                tryTimes = 0;
-                // 遍历所有元素
-                for (int i = processCount; i < elements.size(); i++) {
-                    ElementHandle element = elements.get(i);
-                    
-                    //判断element里面是否有div包含子元素span的文字内容为 Ready
-                    boolean hasReadySpan = false;
-                    try {
-                        // 使用querySelector查找包含span且文本为Ready的div元素
-                        ElementHandle readyDiv = element.querySelector("//div/span[contains(text(),'Ready')]");
-                        if (readyDiv != null) {
-                            hasReadySpan = true;
-                            //System.out.println("找到包含'Ready'状态的元素");
-                        }
-                    } catch (Exception e) {
-                        System.out.println("检查Ready状态时出错: " + e.getMessage());
-                    }
-                        
-                    PodCastItem item = new PodCastItem();
-
-                    parseLinkChild(element,item);
-                    parseChannelChild(element,item);
-                    item.isProcessed = hasReadySpan;
-
-                    if (!itemNameList.contains(item.title))
-                    {
-                        if (item.isProcessed)
-                        {
-                            validItemCount += 1;
-
-                            itemList.add(item);
-
-                            itemNameList.add(item.title);
-
-                            System.out.println("有效的item: " + item.channelName +  "," + item.title +  "," + item.linkString+ "," + item.isProcessed); 
-
-                            if(validItemCount >= maxprocessCount)
-                            {
-                                System.out.println("已处理" + validItemCount + "个有效item，准备下载");
-                                break;
-                            }
-                        }
-                        else
-                        {
-                            System.out.println("未被分析的item: " + item.channelName +  "," + item.title); 
-                        }
-                        
-                    }
-                    else
-                    {
-                        System.out.println("重复item: " + item.channelName +  "," + item.title); 
-                    }
-  
+    private boolean navigateToFollowing(Page page) {
+        try {
+            ElementHandle libraryButton = page.waitForSelector(XPATH_LIBRARY, new Page.WaitForSelectorOptions().setTimeout(DEFAULT_TIMEOUT_MS));
+            if (libraryButton != null) {
+                log("找到Library按钮");
+                libraryButton.click();
+                ElementHandle followingBtn = page.waitForSelector(XPATH_FOLLOWING, new Page.WaitForSelectorOptions().setTimeout(DEFAULT_TIMEOUT_MS));
+                if (followingBtn != null) {
+                    followingBtn.evaluate("node => node.click()");
+                    return true;
                 }
-
-                processCount = elements.size(); 
-                System.out.println("处理了元素总数: " + processCount);
             }
-            else{
-                tryTimes += 1;
+        } catch (Exception e) {
+            log("导航到 Following 失败: " + e.getMessage());
+        }
+        return false;
+    }
+
+    private void filterReadyPodcasts(Page page) {
+        try {
+            page.locator("button:has-text('All')").click();
+            page.waitForSelector("div[role='option']:has-text('ready')");
+            page.locator("div[role='option']:has-text('ready')").click();
+        } catch (Exception e) {
+            log("筛选 Ready 状态失败: " + e.getMessage());
+        }
+    }
+
+    private void loadProcessedItems(List<String> itemNameList) {
+        File folder = new File(DOWNLOAD_DIR_ORIGINAL);
+        if (!folder.exists()) {
+            folder.mkdirs();
+            return;
+        }
+        File[] files = folder.listFiles();
+        if (files != null) {
+            for (File file : files) {
+                if (file.isFile() && file.getName().endsWith(".pdf") && file.getName().contains("_")) {
+                    // Original logic: file.getName().replace(".pdf", "").split("_")[1]
+                    // Caution: split("_") might return array with length < 2 if filename is malformed
+                    String[] parts = file.getName().replace(".pdf", "").split("_");
+                    if (parts.length >= 2) {
+                        itemNameList.add(parts[1]);
+                    }
+                }
+            }
+        }
+    }
+
+    private void processNodeList(List<PodCastItem> itemList, List<String> itemNameList,
+                                 Page page, String preciseXpath, int maxProcessCount, int maxTryTimes) {
+        int validItemCount = 0;
+        int tryTimes = 0;
+        int lastProcessedIndex = 0;
+
+        do {
+            List<ElementHandle> elements = page.querySelectorAll(preciseXpath);
+            log("当前元素总数: " + elements.size() + ", 已处理索引: " + lastProcessedIndex + ", 重试次数: " + tryTimes);
+
+            if (elements.size() > lastProcessedIndex) {
+                tryTimes = 0; // Reset retry count as we found new items
+
+                for (int i = lastProcessedIndex; i < elements.size(); i++) {
+                    if (validItemCount >= maxProcessCount) break;
+
+                    ElementHandle element = elements.get(i);
+                    PodCastItem item = parsePodcastItem(element);
+
+                    if (item != null && !itemNameList.contains(item.title)) {
+                        if (item.isProcessed) {
+                            validItemCount++;
+                            itemList.add(item);
+                            itemNameList.add(item.title);
+                            log("找到有效Item: " + item.channelName + " - " + item.title + ",totalValid:" + validItemCount);
+                        } else {
+                            log("未处理Item: " + item.channelName + " - " + item.title);
+                        }
+                    } else if (item != null) {
+                        log("重复Item: " + item.channelName + " - " + item.title);
+                    }
+                }
+                lastProcessedIndex = elements.size();
+            } else {
+                tryTimes++;
+                if (tryClickLoadMore(page)) {
+                    page.waitForTimeout(2000); // Wait for content to start loading
+                    continue; 
+                }
             }
 
-            if (validItemCount >= maxprocessCount) {
+            if (validItemCount >= maxProcessCount) {
+                log("已达到最大处理数量: " + maxProcessCount);
                 break;
             }
 
-            ElementHandle element = elements.get(elements.size() - 1);
-
-            try {
-                // 确保元素可见
-                element.evaluate("element => element.scrollIntoViewIfNeeded()");
-                System.out.println("已将最后一个元素滚动到可见区域");
-                
-                // 等待元素稳定
-                Thread.sleep(1000);
-                
-                // 开始下拉滚动
-                System.out.println("等待底部内容加载...");
-
-                // 方法A: 等待页面高度变化
-                PodCastUtil.waitForHeightStabilized(page, 10); // 最多等10秒
-
-                // 等待页面加载新内容
-                // 优化：使用更宽松的加载状态，并设置超时时间
-                try {                  
-                    // 然后等待特定元素出现（使用原来的XPath选择器），表示新内容已加载
-                    page.waitForSelector(preciseXpath, new Page.WaitForSelectorOptions().setTimeout(60000));
-                    
-                    System.out.println("下拉滚动完成，页面已加载新内容");
-                } catch (Exception e) {
-                    // 如果超时，继续执行，不要等待太长时间
-                    System.out.println("页面加载超时，继续执行");
-                }
-                
-                // 短暂等待，确保页面有足够时间处理
-                Thread.sleep(500);
-                
-                // 更新元素列表，包含新加载的元素
-                elements = page.querySelectorAll(preciseXpath);
-                System.out.println("更新后元素总数: " + elements.size());
-                
-            } catch (Exception e) {
-                System.out.println("滚动操作时出错: " + e.getMessage());
-                e.printStackTrace();
-            }
-        } while (tryTimes <= maxTryTimes && validItemCount < maxprocessCount) ;
-        
-    }
-
-
-    private void downloadPodcasts(List<PodCastItem> itemList,BrowserContext context,boolean needTranslateCN){
-        for (PodCastItem item : itemList) {
-            if (item.isProcessed) {
-                // 下载 podcast
-
-                String podItemUrl = "https://podwise.ai" + item.linkString;
-
-                Page downloadPage = context.newPage();
-                downloadPage.navigate(podItemUrl);
-                downloadPage.waitForLoadState(LoadState.NETWORKIDLE);
-
-                downloadPage.bringToFront();  // 1. 将页面带到前台
-                   
-                try{
-                    // 等待页面稳定
-                    Thread.sleep(1000); 
-
-                    ElementHandle exportDiv = downloadPage.querySelector("//button/span[contains(text(),'Export')]");
-
-                    if (exportDiv != null)
-                    {
-                        exportDiv.evaluate("element => element.scrollIntoViewIfNeeded()");
-                        // 等待元素可交互
-                        Thread.sleep(500);
-
-                        exportDiv.click(new ElementHandle.ClickOptions().setForce(true));
-                        //exportDiv.evaluate("element => element.click()");
-
-                        ElementHandle pdfButton = downloadPage.waitForSelector(
-                        "//button/span[contains(text(),'PDF')]", 
-                            new Page.WaitForSelectorOptions().setTimeout(5000)
-                        );
-
-                        if (pdfButton != null)
-                        {
-                            pdfButton.click();
-
-                            ElementHandle downloadBtn = downloadPage.waitForSelector(
-                                "//button[contains(text(),'Download')]", 
-                            new Page.WaitForSelectorOptions().setTimeout(5000)
-                            );
-
-                            if(downloadBtn != null)
-                            {
-
-                                // 等待下载完成,英文版
-                                Download download = downloadPage.waitForDownload(() -> {
-                                    downloadBtn.click(); // 替换为实际的下载按钮选择器
-                                });
-                    
-                                    // 指定保存路径
-                                String downloadPath = DOWNLOAD_DIR + item.channelName + "_" + item.title + ".pdf"; // 指定完整路径和文件名
-                                download.saveAs(Paths.get(downloadPath));
-
-                                 // 获取下载信息 
-                                System.out.println("下载URL: " + download.url());
-                                System.out.println("保存路径: " + downloadPath);
-
-
-                                if (needTranslateCN)
-                                {
-                                    try
-                                    {
-                                        ElementHandle langBtn = downloadPage.waitForSelector(
-                                            "//button[contains(text(),'Original')]", 
-                                            new Page.WaitForSelectorOptions().setTimeout(5000)
-                                        );
-
-                                        if (langBtn != null)
-                                        {
-                                            langBtn.click();
-
-                                            ElementHandle cnBtn = downloadPage.querySelector(
-                                                "//button[span[contains(text(),'简体中文')] and span[contains(text(),'Select')]]"
-                                            );
-                                            
-                                            boolean isCnTranslated = false;
-
-                                            if (cnBtn != null)
-                                            {
-                                                cnBtn.click();
-                                                isCnTranslated = true;
-                                            }
-                                            else
-                                            {
-                                                cnBtn = downloadPage.querySelector(
-                                                    "//button/span[contains(text(),'简体中文')]"
-                                                );
-
-                                                if (cnBtn != null)
-                                                {
-                                                    cnBtn.click();
-                                                }   
-
-                                                try
-                                                {
-                                                    cnBtn = downloadPage.waitForSelector(
-                                                    "//button[span[contains(text(),'简体中文')] and span[contains(text(),'Select')]]",
-                                                        new Page.WaitForSelectorOptions().setTimeout(15*60*1000));    
-                                                        
-                                                    cnBtn.click();
-                                                    isCnTranslated = true;
-                                                }
-                                                catch (Exception ex)
-                                                {
-                                                    System.out.println("点击简体中文按钮失败: " + ex.getMessage());
-                                                }
-                                            }
- 
-                                            if (isCnTranslated)
-                                            {
-                                                ElementHandle newDownloadBtn = downloadPage.waitForSelector(
-                                                        "//button[contains(text(),'Download')]", 
-                                                    new Page.WaitForSelectorOptions().setTimeout(5000)
-                                                    );
-
-                                                download = downloadPage.waitForDownload(() -> {
-                                                    newDownloadBtn.click(); // 替换为实际的下载按钮选择器
-                                                });
-
-                                                downloadPath = DOWNLOAD_DIR_CN + "CN_" + item.channelName + "_" + item.title + ".pdf"; // 指定完整路径和文件名
-                                                download.saveAs(Paths.get(downloadPath));
-
-                                                System.out.println("中文保存路径: " + downloadPath);
-                                            }
-                                        }
-                                    }
-                                    catch (Exception ex)
-                                    {
-                                        System.out.println("切换语言按钮点击失败: " + ex.getMessage());
-                                    }
-                                }//不需要下载中文
-                                       
-                            }
-
-                        }
-
-                    }
-                }
-                catch(Exception ex)
-                {
-                    ex.printStackTrace();
-                }
-                finally{
-                    downloadPage.close();
-                }  
-
-                System.out.println(item.channelName +  "," + item.title +  "," + item.linkString+ " is processed");
-            }
-            else
-            {
-                System.out.println(item.channelName +  "," + item.title +  "," + item.linkString+ " is not processed");
-            }
-                
-        }//end for loop
-    }
-
-	private void parseLinkChild(ElementHandle element,PodCastItem item) {
-        try {
-            // 方法1: 使用 querySelector 查找直接子元素中的第一个a标签
-            ElementHandle firstLink = element.querySelector(":scope > a, :scope a:first-child");
-            
-            if (firstLink == null) {
-                // 如果不是直接子元素，可能是子孙元素中的第一个
-                firstLink = element.querySelector("a");
-            }
-            
-            if (firstLink != null) {
-                String href = firstLink.getAttribute("href");
-                String linkText = (String) firstLink.evaluate("element => element.textContent.trim()");
-                
-				item.title = linkText;
-				item.linkString = href;
-                
-            } else {
-                System.out.println("未找到超链接子节点");
-            }
-            
-        } catch (Exception e) {
-            System.out.println("解析超链接时出错: " + e.getMessage());
-        }
-    }
-
-	private void parseChannelChild(ElementHandle element,PodCastItem item) {
-        try 
-		{
-			ElementHandle divChild = element.querySelector("//img[contains(@alt,'Podcast cover')]/../span");
-
-            if (divChild != null) {
-                String spanText = (String) divChild.evaluate("span => span.textContent.trim()");
-                //System.out.println("channel name: " + spanText);
-
-					item.channelName = spanText;
-            }
-            
-            
-        } catch (Exception e) {
-            System.out.println("解析子节点时出错: " + e.getMessage());
-        }
-	}
-
-    public void processDownloadedFiles(int maxProcessCount,ModelType modelType,boolean needGenerateImage,boolean isStreamingProcess) {
-
-        int processedCount = 0;
-
-        try {
-            // 确保下载目录存在
-            java.io.File dir = new java.io.File(DOWNLOAD_DIR);
-            java.io.File outputDir = new java.io.File(DOWNLOAD_DIR_SUMMARY);
-            if (!dir.exists() || !dir.isDirectory()) {
-                System.out.println("下载目录不存在: " + DOWNLOAD_DIR);
-                return;
-            }
-
-            if (!outputDir.exists() || !outputDir.isDirectory()) {
-                outputDir.mkdirs();
-            }
-            
-            // 遍历目录中的 PDF 文件
-            java.io.File[] files = dir.listFiles((d, name) -> name.toLowerCase().endsWith(".pdf"));
-            if (files == null || files.length == 0) {
-                System.out.println("下载目录中没有 PDF 文件");
-                return;
-            }
-            
-            System.out.println("找到 " + files.length + " 个 PDF 文件，开始生成中文摘要...");
-            
-            for (java.io.File pdfFile : files) {
-                if (processedCount >= maxProcessCount) {
+            if (!scrollToLoadMore(page)) {
+                if (tryTimes > maxTryTimes) {
+                    log("达到最大重试次数，停止加载");
                     break;
                 }
-                
-                processedCount++;
-                
-                String pdfFileName = pdfFile.getName();
-                System.out.println("正在处理文件: " + pdfFileName);
-                
-                // 构建输出文件名：在 .pdf 前添加 .cn 后缀
-                String outputFileName = pdfFileName.replace(".pdf", "_cn_summary.txt");
-                String outputFilePath = outputDir.getPath() + "/" + outputFileName;
-                
-                // 检查摘要文件是否已存在
-                java.io.File outputFile = new java.io.File(outputFilePath);
-                if (outputFile.exists()) {
-                    System.out.println("摘要文件已存在，跳过: " + outputFileName);
-                }
-                else
-                {
-                    try {
-                    // 调用 Gemini API 生成中文摘要
-                        String summary = null;
-                        
-                        switch (modelType) {
-                            case GEMINI:
-                                summary = PodCastUtil.generateSummaryWithGemini(pdfFile,summaryPrompt);
-                                break;
-                            case DEEPSEEK:
-                                summary = PodCastUtil.generateSummaryWithDeepSeek(pdfFile,summaryPrompt,isStreamingProcess);
-                                break;
-                            case ALL:
-                                summary = "-- DeepSeek摘要 --\n";
-                                summary += PodCastUtil.generateSummaryWithDeepSeek(pdfFile,summaryPrompt,isStreamingProcess);
-                                summary += "\n\n\n\n";
-                                summary += "-- Gemini 摘要 --\n";
-                                summary += PodCastUtil.generateSummaryWithGemini(pdfFile,summaryPrompt);
-                                break;
-                        }
- 
-                        // 保存摘要到文件
-                        if (summary != null && !summary.isEmpty()) {
-                            try (java.io.FileWriter writer = new java.io.FileWriter(outputFilePath)) {
-                                writer.write(summary);
-                            }
-                            System.out.println("成功生成摘要文件: " + outputFileName);
-                        } else {
-                            System.out.println("生成摘要失败，跳过: " + pdfFileName);
-                        }
+            }
 
-                        // 添加适当的延迟，避免 API 调用过于频繁
-                        Thread.sleep(1000);
-                        
-                    } catch (Exception e) {
-                        System.out.println("处理文件时出错 " + pdfFileName + ": " + e.getMessage());
+        } while (tryTimes <= maxTryTimes && validItemCount < maxProcessCount);
+
+        PodCastUtil.writeItemListToFile(itemList, FILELIST_FILE);
+    }
+
+    private PodCastItem parsePodcastItem(ElementHandle element) {
+        PodCastItem item = new PodCastItem();
+        try {
+            // Parse Link
+            // Original: :scope > a, :scope a:first-child
+            ElementHandle link = element.querySelector(":scope a");
+            if (link == null) link = element.querySelector("a");
+            
+            if (link != null) {
+                item.linkString = link.getAttribute("href");
+                String text = (String) link.evaluate("el => el.textContent.trim()");
+                item.title = text.replaceAll("[\\\\/:*?\"<>|]", "");
+            }
+
+            // Parse Channel
+            ElementHandle channel = element.querySelector("//img[contains(@alt,'Podcast cover')]/../span");
+            if (channel != null) {
+                item.channelName = (String) channel.evaluate("el => el.textContent.trim()");
+            }
+
+            // Check Ready Status
+            ElementHandle readySpan = element.querySelector(XPATH_READY_STATUS);
+            item.isProcessed = (readySpan != null);
+
+            if (item.title != null && !item.title.isEmpty()) {
+                return item;
+            }
+        } catch (Exception e) {
+            log("解析Item失败: " + e.getMessage());
+        }
+        return null;
+    }
+
+    private boolean tryClickLoadMore(Page page) {
+        ElementHandle loadMore = page.querySelector(SELECTOR_LOAD_MORE);
+        if (loadMore != null) {
+            loadMore.click();
+            return true;
+        }
+        return false;
+    }
+
+    private boolean scrollToLoadMore(Page page) {
+        try {
+            // Ensure last element is visible to trigger infinite scroll if applicable
+            // Original code scrolled the last element into view.
+            // page.evaluate("window.scrollTo(0, document.body.scrollHeight)"); 
+            
+            // Replicating original behavior more closely + optimization
+            page.keyboard().press("End");
+            log("已滚动到底部，等待加载...");
+            
+            PodCastUtil.waitForHeightStabilized(page, 10);
+            return true;
+        } catch (Exception e) {
+            log("滚动失败: " + e.getMessage());
+            return false;
+        }
+    }
+
+    private void downloadPodcasts(BrowserContext context, boolean needTranslateCN, ModelType modelType) {
+        List<PodCastItem> itemList = PodCastUtil.readItemListFromFile(FILELIST_FILE);
+
+        for (PodCastItem item : itemList) {
+            String downloadPath = DOWNLOAD_DIR_ORIGINAL + item.channelName + "_" + item.title + ".pdf";
+            if (new File(downloadPath).exists()) {
+                log("文件已存在，跳过下载: " + downloadPath);
+                continue;
+            }
+
+            if (item.isProcessed) {
+                downloadSinglePodcast(context, item, downloadPath, needTranslateCN, modelType);
+            }
+        }
+
+        new File(FILELIST_FILE).delete();
+    }
+
+    private void downloadSinglePodcast(BrowserContext context, PodCastItem item, String downloadPath, boolean needTranslateCN, ModelType modelType) {
+        Page page = context.newPage();
+        try {
+            String url = "https://podwise.ai" + item.linkString;
+            page.navigate(url);
+            page.waitForLoadState(LoadState.NETWORKIDLE);
+            page.waitForTimeout(1000); // Wait a bit for UI stability
+
+            ElementHandle exportDiv = page.querySelector("//button/span[contains(text(),'Export')]");
+
+            if (exportDiv != null) {
+                exportDiv.scrollIntoViewIfNeeded();
+                page.waitForTimeout(500);
+                exportDiv.click(new ElementHandle.ClickOptions().setForce(true));
+
+                ElementHandle pdfButton = page.waitForSelector("//button/span[contains(text(),'PDF')]", 
+                    new Page.WaitForSelectorOptions().setTimeout(SHORT_TIMEOUT_MS));
+
+                if (pdfButton != null) {
+                    pdfButton.click();
+
+                    ElementHandle downloadBtn = page.waitForSelector("//button[contains(text(),'Download')]", 
+                        new Page.WaitForSelectorOptions().setTimeout(SHORT_TIMEOUT_MS));
+
+                    if (downloadBtn != null) {
+                        Download download = page.waitForDownload(() -> {
+                            downloadBtn.click();
+                        });
+                        download.saveAs(Paths.get(downloadPath));
+                        log("下载URL: " + download.url());
+                        log("保存路径: " + downloadPath);
+
+                        if (needTranslateCN) {
+                            downloadChineseVersion(page, item);
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log("下载处理出错 [" + item.title + "]: " + e.getMessage());
+            e.printStackTrace();
+        } finally {
+            page.close();
+            log(item.channelName + "," + item.title + " is processed");
+        }
+    }
+
+    private String downloadChineseVersion(Page page, PodCastItem item) {
+        String cnPath = null;
+        try {
+            ElementHandle langBtn = page.waitForSelector("//button[contains(text(),'Original')]", 
+                new Page.WaitForSelectorOptions().setTimeout(SHORT_TIMEOUT_MS));
+            
+            if (langBtn != null) {
+                langBtn.click();
+
+                // Logic to find and click Chinese button
+                // Try precise selector first
+                ElementHandle cnBtn = page.querySelector("//button[span[contains(text(),'简体中文')] and span[contains(text(),'Select')]]");
+                
+                if (cnBtn == null) {
+                    // Try looser selector
+                    ElementHandle cnOption = page.querySelector("//button/span[contains(text(),'简体中文')]");
+                    if (cnOption != null) {
+                        cnOption.click();
+                        // Wait for it to become 'Select' or active
+                        try {
+                            cnBtn = page.waitForSelector("//button[span[contains(text(),'简体中文')] and span[contains(text(),'Select')]]",
+                                new Page.WaitForSelectorOptions().setTimeout(DEFAULT_TIMEOUT_MS)); // Wait longer for translation
+                        } catch(Exception e) {
+                            log("等待简体中文转换超时");
+                        }
                     }
                 }
 
-                if(needGenerateImage)
-                {
-                    // 调用 Gemini API 生成图片摘要
-                    PodCastUtil.generateImageWithGemini(outputFile.getAbsolutePath(),DOWNLOAD_DIR_IMAGE,imagePrompt);
+                if (cnBtn != null) {
+                    // If it wasn't clicked yet (first case)
+                    // Or if we need to click 'Select' now
+                    // The logic in original code was: if found direct Select -> click. 
+                    // If found Option -> click Option -> wait for Select -> click Select.
+                    // Let's assume cnBtn is now the 'Select' button.
+                    cnBtn.click(); 
+
+                    ElementHandle newDownloadBtn = page.waitForSelector("//button[contains(text(),'Download')]", 
+                        new Page.WaitForSelectorOptions().setTimeout(SHORT_TIMEOUT_MS));
+                    
+                    if (newDownloadBtn != null) {
+                        Download download = page.waitForDownload(() -> {
+                            newDownloadBtn.click();
+                        });
+                        
+                        cnPath = DOWNLOAD_DIR_CN + "CN_" + item.channelName + "_" + item.title + ".pdf";
+                        download.saveAs(Paths.get(cnPath));
+                        log("中文保存路径: " + cnPath);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log("下载中文版失败: " + e.getMessage());
+        }
+        return cnPath;
+    }
+
+    /**
+     * 处理已下载的文件（生成摘要、图片等）
+     * 
+     * @param maxProcessCount 最大处理文件数量
+     * @param modelType 使用的大模型类型 (DEEPSEEK / GEMINI)
+     * @param needGenerateImage 是否需要生成配图 (使用 Gemini)
+     * @param isStreamingProcess 是否使用流式输出 (针对 DeepSeek)
+     * @param downloadDir 下载目录
+     * @param downloadDirSummary 摘要输出目录
+     */
+    public void processDownloadedFiles(String downloadDir, String downloadDirSummary, String downloadDirImage,
+            int maxProcessCount, ModelType modelType, boolean needGenerateImage, boolean isStreamingProcess) 
+    {
+        int processedCount = 0;
+        try {
+            File dir = new File(downloadDir);
+            File outputDir = new File(downloadDirSummary);
+            
+            if (!dir.exists() || !dir.isDirectory()) {
+                log("下载目录不存在: " + downloadDir);
+                return;
+            }
+            if (!outputDir.exists()) outputDir.mkdirs();
+
+
+            File[] files = dir.listFiles((d, name) -> name.toLowerCase().endsWith(".pdf"));
+            if (files == null || files.length == 0) {
+                log("下载目录中没有 PDF 文件");
+                return;
+            }
+
+            log("找到 " + files.length + " 个 PDF 文件，开始生成中文摘要...");
+
+            for (File pdfFile : files) {
+                if (processedCount >= maxProcessCount) break;
+
+                processedCount++;
+                String pdfFileName = pdfFile.getName();
+                log("正在处理文件: " + pdfFileName);
+
+                String outputFileName = pdfFileName.replace(".pdf", "_cn_summary.txt");
+                String outputFilePath = outputDir.getPath() + "/" + outputFileName;
+                File outputFile = new File(outputFilePath);
+
+                if (outputFile.exists()) {
+                    log("摘要文件已存在，跳过: " + outputFileName);
+                } else {
+                    processSingleSummary(pdfFile, outputFile, modelType, isStreamingProcess);
                 }
 
+                if (needGenerateImage && outputFile.exists()) {
+                    PodCastUtil.generateImageWithGemini(outputFile.getAbsolutePath(), downloadDirImage, IMAGE_PROMPT);
+                }
             }
-            
-            System.out.println("所有文件处理完成");
-            
+            log("所有文件处理完成");
+
         } catch (Exception e) {
-            System.out.println("处理下载文件时出错: " + e.getMessage());
+            log("处理下载文件时出错: " + e.getMessage());
         }
     }
-    
+
+    public void batchRenameChineseFiles(ModelType modelType, int maxBatchSize) {
+        File dir = new File(DOWNLOAD_DIR_CN);
+        if (!dir.exists() || !dir.isDirectory()) {
+            log("中文下载目录不存在: " + DOWNLOAD_DIR_CN);
+            return;
+        }
+
+        File[] files = dir.listFiles((d, name) -> name.toLowerCase().endsWith(".pdf") && name.startsWith("CN_"));
+        if (files == null || files.length == 0) {
+            log("中文下载目录中没有符合格式的文件");
+            return;
+        }
+
+        log("开始批量翻译重命名中文版文件，共 " + files.length + " 个文件");
+        
+        StringBuilder fileListBuilder = new StringBuilder();
+        List<File> fileBatch = new ArrayList<>();
+        int batchSize = maxBatchSize; // Process 50 files at a time
+
+        for (int i = 0; i < files.length; i++) {
+            fileListBuilder.append(files[i].getName()).append("\n");
+            fileBatch.add(files[i]);
+
+            if ((i + 1) % batchSize == 0 || i == files.length - 1) {
+                processBatchRename(fileBatch, fileListBuilder.toString(), modelType);
+                fileListBuilder.setLength(0);
+                fileBatch.clear();
+            }
+        }
+    }
+
+    private void processBatchRename(List<File> files, String fileListStr, ModelType modelType) {
+        try {
+            String prompt = RENAME_PROMPT + fileListStr;
+            String response = "";
+
+            log("正在请求批量翻译文件名...");
+
+            if (modelType == ModelType.GEMINI || modelType == ModelType.ALL) {
+                response = PodCastUtil.chatWithGemini(prompt).trim();
+            } else if (modelType == ModelType.DEEPSEEK) {
+                response = PodCastUtil.chatWithDeepSeek(prompt).trim();
+            }
+
+            // Clean up response code blocks if any
+            response = response.replace("```", "");
+            
+            String[] lines = response.split("\n");
+            for (String line : lines) {
+                line = line.trim();
+                if (line.isEmpty() || !line.contains("=")) continue;
+
+                String[] parts = line.split("=", 2);
+                if (parts.length == 2) {
+                    String originalName = parts[0].trim();
+                    String newName = parts[1].trim();
+                    
+                    if (!originalName.equals(newName) && newName.endsWith(".pdf")) {
+                         // Check if valid filename
+                        if (newName.matches(".*[\\\\/:*?\"<>|].*")) {
+                            log("跳过非法文件名: " + newName);
+                            continue;
+                        }
+
+                        // Find the file object matching originalName
+                        File fileToRename = null;
+                        for(File f : files) {
+                            if(f.getName().equals(originalName)) {
+                                fileToRename = f;
+                                break;
+                            }
+                        }
+
+                        if (fileToRename != null && fileToRename.exists()) {
+                            File newFile = new File(fileToRename.getParent(), newName);
+                            if (fileToRename.renameTo(newFile)) {
+                                log("重命名成功: " + originalName + " -> " + newName);
+                            } else {
+                                log("重命名失败: " + originalName + " -> " + newName);
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log("批量重命名出错: " + e.getMessage());
+        }
+    }
+
+    private void processSingleSummary(File pdfFile, File outputFile, ModelType modelType, boolean isStreamingProcess) {
+        try {
+            String summary = null;
+            switch (modelType) {
+                case GEMINI:
+                    summary = PodCastUtil.generateSummaryWithGemini(pdfFile, SUMMARY_PROMPT);
+                    break;
+                case DEEPSEEK:
+                    summary = PodCastUtil.generateSummaryWithDeepSeek(pdfFile,SUMMARY_PROMPT,isStreamingProcess);
+                    break;
+                case ALL:
+                    summary = "-- DeepSeek摘要 --\n" + 
+                              PodCastUtil.generateSummaryWithDeepSeek(pdfFile,SUMMARY_PROMPT,isStreamingProcess) +
+                              "\n\n\n\n-- Gemini 摘要 --\n" +
+                              PodCastUtil.generateSummaryWithGemini(pdfFile, SUMMARY_PROMPT);
+                    break;
+            }
+
+            if (summary != null && !summary.isEmpty()) {
+                try (FileWriter writer = new FileWriter(outputFile)) {
+                    writer.write(summary);
+                }
+                log("成功生成摘要文件: " + outputFile.getName());
+                Thread.sleep(1000); // Rate limit
+            } else {
+                log("生成摘要失败，跳过: " + pdfFile.getName());
+            }
+        } catch (Exception e) {
+            log("生成摘要出错 " + pdfFile.getName() + ": " + e.getMessage());
+        }
+    }
+
+    private void log(String msg) {
+        System.out.println(msg);
+    }
 }

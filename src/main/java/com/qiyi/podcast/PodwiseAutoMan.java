@@ -4,6 +4,9 @@
 package com.qiyi.podcast;
 
 
+import java.io.File;
+import java.io.IOException;
+
 import com.microsoft.playwright.Browser;
 import com.microsoft.playwright.Playwright;
 
@@ -28,7 +31,7 @@ public class PodwiseAutoMan {
     }
 
 
-	public static void main(String[] args) {
+	public static void main(String[] args) throws IOException {
 
         
         PodwiseAutoMan autoMan = new PodwiseAutoMan();
@@ -37,11 +40,17 @@ public class PodwiseAutoMan {
         autoMan.connectAndAutomate();
 
         //下载关注的播客节目的文本文件
-         DownLoadPodCastTask downLoadPodCastTask = new DownLoadPodCastTask(autoMan.browser,"/Users/cenwenchu/Desktop/podcastItems/");
-         downLoadPodCastTask.performAutomationDownloadTasks(10,5,true);
+         DownLoadPodCastTask downLoadPodCastTask = new DownLoadPodCastTask(autoMan.browser,"/Users/cenwenchu/Desktop/podCastItems/");
+         
+         //downLoadPodCastTask.batchRenameChineseFiles(ModelType.DEEPSEEK, 30);
+
+         //下载关注的播客节目的文本文件
+         //downLoadPodCastTask.performAutomationDownloadTasks(1,5,true, ModelType.DEEPSEEK,20);
 
          //对于下载的文件，通过调用gemini的api来做翻译和中文摘要
-         downLoadPodCastTask.processDownloadedFiles(2,ModelType.ALL,false,true);
+         downLoadPodCastTask.processDownloadedFiles(downLoadPodCastTask.DOWNLOAD_DIR_CN,
+            downLoadPodCastTask.DOWNLOAD_DIR_SUMMARY,downLoadPodCastTask.DOWNLOAD_DIR_IMAGE,
+            5,ModelType.DEEPSEEK,false,true);
 
 
 
@@ -55,6 +64,9 @@ public class PodwiseAutoMan {
 
 	}
 
+    /**
+     * 连接到现有 Chrome 实例，如果不存在则启动新实例
+     */
     public void connectAndAutomate() {
         
         try {
@@ -90,7 +102,18 @@ public class PodwiseAutoMan {
     }
 
 
+    /**
+     * 断开与浏览器的连接并清理相关进程
+     */
     public void disconnectBrowser() {
+        if (browser != null) {
+            try {
+                browser.close();
+            } catch (Exception e) {
+                System.out.println("关闭浏览器连接失败: " + e.getMessage());
+            }
+        }
+
         if (playwright != null) {
                 playwright.close();
             }

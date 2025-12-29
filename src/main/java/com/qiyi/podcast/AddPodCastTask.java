@@ -17,6 +17,11 @@ public class AddPodCastTask {
         this.browser = browser;
     }
 
+    /**
+     * 根据播客名称数组，批量添加（关注）播客
+     * 
+     * @param podCastNames 播客名称数组，包含需要搜索和添加的播客名称
+     */
     public void addPodCast(String[] podCastNames) {
 
        BrowserContext context = browser.contexts().isEmpty() ? 

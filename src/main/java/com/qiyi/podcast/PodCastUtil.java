@@ -20,6 +20,7 @@ import org.apache.pdfbox.text.PDFTextStripper;
 
 import java.nio.file.Files;
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.genai.Client;
@@ -46,6 +47,12 @@ public class PodCastUtil {
     static String GEMINI_API_KEY = "";
     static String DEEPSEEK_API_KEY = "";
 
+    /**
+     * 获取 Chrome 浏览器的 WebSocket 调试端点 URL
+     * 
+     * @param port 调试端口号 (通常为 9222)
+     * @return WebSocket URL，如果获取失败返回 null
+     */
     public static String getChromeWsEndpoint(int port) {
         try {
             URL url = new URL("http://localhost:" + port + "/json/version");
@@ -70,6 +77,12 @@ public class PodCastUtil {
         }
     }
     
+    /**
+     * 检查当前页面是否已登录
+     * 
+     * @param page Playwright 页面对象
+     * @return 已登录返回 true，否则返回 false
+     */
     public static boolean isLoggedIn(Page page) {
         try {
             // 检查是否有登录状态的元素
@@ -80,6 +93,11 @@ public class PodCastUtil {
         }
     }
 
+    /**
+     * 暂停程序等待用户在浏览器中手动完成登录
+     * 
+     * @param page Playwright 页面对象
+     */
     public static void waitForManualLogin(Page page) {
         System.out.println("请在浏览器中手动登录，登录后按 Enter 键继续...");
         
@@ -95,6 +113,11 @@ public class PodCastUtil {
         }
     }
 
+    /**
+     * 杀死占用指定端口的 Chrome 进程
+     * 
+     * @param port 端口号 (通常为 9222)
+     */
     public static void killChromeProcess(int port) {
         //  先杀死占用 9222 端口的进程等待一段时间，确保进程已完全终止
         try {
@@ -110,6 +133,12 @@ public class PodCastUtil {
         }
     }
 
+    /**
+     * 启动带有远程调试端口的 Chrome 浏览器
+     * 
+     * @throws IOException IO异常
+     * @throws InterruptedException 中断异常
+     */
     public static void startChromeBrowser() throws IOException, InterruptedException {
         // 启动 Chrome 浏览器
         System.out.println("正在启动 Chrome 浏览器...");
@@ -122,7 +151,13 @@ public class PodCastUtil {
         Thread.sleep(3000);
     }
 
-        // 专门检测高度是否稳定
+    /**
+     * 等待页面高度稳定（用于处理无限滚动加载）
+     * 
+     * @param page Playwright 页面对象
+     * @param maxSeconds 最大等待时间（秒）
+     * @throws InterruptedException 中断异常
+     */
     public static void waitForHeightStabilized(Page page, int maxSeconds) throws InterruptedException {
         int stableCount = 0;
         int lastHeight = 0;
@@ -173,6 +208,13 @@ public class PodCastUtil {
     }
 
 
+    /**
+     * 使用 Gemini 模型生成图片
+     * 
+     * @param fileString 输入文件路径（摘要文本）
+     * @param outputDirectory 图片输出目录
+     * @param imagePrompt 生成图片的提示词
+     */
     public static void generateImageWithGemini(String fileString, String outputDirectory,String imagePrompt) {
 
             initClientConfig();
@@ -245,6 +287,15 @@ public class PodCastUtil {
     
 
 
+    /**
+     * 使用 DeepSeek 模型生成摘要
+     * 
+     * @param pdfFile PDF文件对象
+     * @param summaryPrompt 摘要提示词
+     * @param isStreamingProcess 是否使用流式输出
+     * @return 生成的摘要文本
+     * @throws IOException IO异常
+     */
     public static String generateSummaryWithDeepSeek(java.io.File pdfFile,String summaryPrompt,boolean isStreamingProcess) throws IOException 
     {
         String responseText = "";
@@ -256,6 +307,7 @@ public class PodCastUtil {
         UserMessage userMessage = UserMessage.builder()
                     .addText(summaryPrompt)
                     .addText(pdfContent).build();
+
 
         if (isStreamingProcess)
         {
@@ -272,11 +324,12 @@ public class PodCastUtil {
             try
             {
                 ChatCompletionRequest request = ChatCompletionRequest.builder()
-                .model("deepseek-chat")
-                .messages(userMessage)
-                .stream(true)  // 启用流式
-                .streamOptions(StreamOptions.builder().includeUsage(true).build())
-                .build();
+                    .model("deepseek-chat")
+                    .messages(userMessage)
+                    .stream(true)  // 启用流式
+                    .streamOptions(StreamOptions.builder().includeUsage(true).build())
+                    .build();
+                
         
                 System.out.println("开始流式响应...\n");
                 Flux<ChatCompletionResponse> flux = deepseekClient.chatFluxCompletion(request);
@@ -366,6 +419,13 @@ public class PodCastUtil {
         return responseText;
     }
 
+    /**
+     * 读取PDF文件内容
+     * 
+     * @param file PDF文件对象
+     * @return 提取的文本内容
+     * @throws IOException IO异常
+     */
     public static String readFileContent(java.io.File file) throws IOException {
 
         try (PDDocument document = Loader.loadPDF(file)) {
@@ -377,6 +437,13 @@ public class PodCastUtil {
         }
     }
 
+    /**
+     * 使用 Gemini 模型生成摘要
+     * 
+     * @param pdfFile PDF文件对象
+     * @param summaryPrompt 摘要提示词
+     * @return 生成的摘要文本
+     */
     public static String generateSummaryWithGemini(java.io.File pdfFile,String summaryPrompt) 
     {
         
@@ -426,6 +493,67 @@ public class PodCastUtil {
         return responseText;
     }
 
+    /**
+     * 与 DeepSeek 模型进行简单对话（用于翻译等）
+     * 
+     * @param prompt 提示词
+     * @return 模型回复的文本
+     */
+    public static String chatWithDeepSeek(String prompt) {
+        initClientConfig();
+        String responseText = "";
+        
+        DeepSeekClient deepseekClient = new DeepSeekClient.Builder()
+            .openAiApiKey(DEEPSEEK_API_KEY)
+            .baseUrl("https://api.deepseek.com")
+            .model("deepseek-chat")
+            .build();
+
+        try {
+            UserMessage userMessage = UserMessage.builder().addText(prompt).build();
+            ChatCompletionRequest request = ChatCompletionRequest.builder().messages(userMessage).build();
+            
+            ChatCompletionResponse response = deepseekClient
+                .chatCompletion(new OpenAiClientContext(), request)
+                .execute();
+
+            if (response != null && response.choices() != null && !response.choices().isEmpty()) {
+                responseText = response.choices().get(0).message().content();
+            }
+        } catch (Exception e) {
+            System.out.println("DeepSeek Chat Error: " + e.getMessage());
+            e.printStackTrace();
+        } finally {
+            deepseekClient.shutdown();
+        }
+        return responseText;
+    }
+
+    /**
+     * 与 Gemini 模型进行简单对话（用于翻译等）
+     * 
+     * @param prompt 提示词
+     * @return 模型回复的文本
+     */
+    public static String chatWithGemini(String prompt) {
+        initClientConfig();
+        String responseText = "";
+        try (Client client = Client.builder().apiKey(GEMINI_API_KEY).build()) {
+            GenerateContentResponse response = client.models.generateContent("gemini-3-flash-preview", prompt, null);
+            responseText = response.text();
+        } catch (Exception e) {
+            System.out.println("Gemini Chat Error: " + e.getMessage());
+            e.printStackTrace();
+        }
+        return responseText;
+    }
+
+    /**
+     * 从文件读取播客名称列表
+     * 
+     * @param filePath 文件路径
+     * @return 播客名称数组
+     */
     public static String[] readPodCastNamesFromFile(String filePath) {
         List<String> podCastNames = new ArrayList<>();
         try (BufferedReader reader = new BufferedReader(new FileReader(filePath))) {
@@ -438,6 +566,57 @@ public class PodCastUtil {
             e.printStackTrace();
         }
         return podCastNames.toArray(new String[0]);
+    }
+
+    /**
+     * 将播客条目列表写入文件 (JSON格式)
+     * 
+     * @param itemList 播客条目列表
+     * @param filePath 输出文件路径
+     */
+    public static void writeItemListToFile(List<PodCastItem> itemList, String filePath) {
+        ObjectMapper mapper = new ObjectMapper();
+        try {
+            // Ensure directory exists
+            java.io.File file = new java.io.File(filePath);
+            java.io.File parentDir = file.getParentFile();
+            if (parentDir != null && !parentDir.exists()) {
+                parentDir.mkdirs();
+            }
+
+            // Write list to file with pretty printing
+            mapper.writerWithDefaultPrettyPrinter().writeValue(file, itemList);
+            System.out.println("成功将 " + itemList.size() + " 个 PodcastItem 写入文件: " + filePath);
+        } catch (IOException e) {
+            System.err.println("写入文件失败: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+    /**
+     * 从文件读取播客条目列表 (JSON格式)
+     * 
+     * @param filePath 输入文件路径
+     * @return 播客条目列表
+     */
+    public static List<PodCastItem> readItemListFromFile(String filePath) {
+        ObjectMapper mapper = new ObjectMapper();
+        List<PodCastItem> itemList = new ArrayList<>();
+        java.io.File file = new java.io.File(filePath);
+
+        if (!file.exists() || file.length() == 0) {
+            return itemList;
+        }
+
+        try {
+            // Read list from file
+            itemList = mapper.readValue(file, new TypeReference<List<PodCastItem>>(){});
+            System.out.println("成功从文件读取 " + itemList.size() + " 个 PodcastItem");
+        } catch (IOException e) {
+            System.err.println("读取文件失败: " + e.getMessage());
+            e.printStackTrace();
+        }
+        return itemList;
     }
 
 }
