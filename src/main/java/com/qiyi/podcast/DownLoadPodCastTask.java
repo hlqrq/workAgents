@@ -547,7 +547,9 @@ public class DownLoadPodCastTask {
                     processSingleSummary(pdfFile, outputFile, modelType, isStreamingProcess);
                     processedCount++;
 
-                    log("已处理 " + processedCount + " 个文件，跳过 " + skipCount + " 个文件，还剩 " + (files.length - processedCount - skipCount) + " 个文件");
+                    log("最大处理文件数: " + maxProcessCount + 
+                    " ，已处理 " + processedCount + " 个文件，跳过 " 
+                    + skipCount + " 个文件，整个文件夹还剩 " + (files.length - processedCount - skipCount) + " 个文件");
                 }
 
                 if (needGenerateImage && outputFile.exists()) {
