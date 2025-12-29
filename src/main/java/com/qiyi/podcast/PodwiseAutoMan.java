@@ -39,40 +39,42 @@ public class PodwiseAutoMan {
         int maxTryTimes = 5;
         int downloadMaxProcessCount = 0;
         int threadPoolSize = 5;
+        int maxDuplicatePages = 10;
 
         // 从main入参读取上面的几个参数，支持提示后输入
-        if (args.length >= 3) {
-            maxProcessCount = Integer.parseInt(args[0]);
-            maxTryTimes = Integer.parseInt(args[1]);
-            downloadMaxProcessCount = Integer.parseInt(args[2]);
-        } else {
-            java.util.Scanner scanner = new java.util.Scanner(System.in);
-            
-            System.out.println("请输入参数 (直接回车使用默认值):");
-            
-            System.out.print("请输入 maxProcessCount (默认 " + maxProcessCount + "): ");
-            String input = scanner.nextLine();
-            if (!input.trim().isEmpty()) {
-                maxProcessCount = Integer.parseInt(input.trim());
-            }
+        
+        java.util.Scanner scanner = new java.util.Scanner(System.in);
+        
+        System.out.println("请输入参数 (直接回车使用默认值):");
+        
+        System.out.print("请输入 maxProcessCount (默认 " + maxProcessCount + "): ");
+        String input = scanner.nextLine();
+        if (!input.trim().isEmpty()) {
+            maxProcessCount = Integer.parseInt(input.trim());
+        }
 
-            System.out.print("请输入 maxTryTimes (默认 " + maxTryTimes + "): ");
-            input = scanner.nextLine();
-            if (!input.trim().isEmpty()) {
-                maxTryTimes = Integer.parseInt(input.trim());
-            }
+        System.out.print("请输入 maxTryTimes (默认 " + maxTryTimes + "): ");
+        input = scanner.nextLine();
+        if (!input.trim().isEmpty()) {
+            maxTryTimes = Integer.parseInt(input.trim());
+        }
 
-            System.out.print("请输入 downloadMaxProcessCount (默认 " + downloadMaxProcessCount + "): ");
-            input = scanner.nextLine();
-            if (!input.trim().isEmpty()) {
-                downloadMaxProcessCount = Integer.parseInt(input.trim());
-            }
-            
-            System.out.print("请输入 threadPoolSize (默认 " + threadPoolSize + "): ");
-            input = scanner.nextLine();
-            if (!input.trim().isEmpty()) {
-                threadPoolSize = Integer.parseInt(input.trim());
-            }
+        System.out.print("请输入 downloadMaxProcessCount (默认 " + downloadMaxProcessCount + "): ");
+        input = scanner.nextLine();
+        if (!input.trim().isEmpty()) {
+            downloadMaxProcessCount = Integer.parseInt(input.trim());
+        }
+        
+        System.out.print("请输入 threadPoolSize (默认 " + threadPoolSize + "): ");
+        input = scanner.nextLine();
+        if (!input.trim().isEmpty()) {
+            threadPoolSize = Integer.parseInt(input.trim());
+        }
+
+        System.out.print("请输入 maxDuplicatePages (默认 " + maxDuplicatePages + "): ");
+        input = scanner.nextLine();
+        if (!input.trim().isEmpty()) {
+            maxDuplicatePages = Integer.parseInt(input.trim());
         }
 
         // 执行自动化操作
@@ -84,7 +86,7 @@ public class PodwiseAutoMan {
          //downLoadPodCastTask.batchRenameChineseFiles(ModelType.DEEPSEEK, 30);
 
          //下载关注的播客节目的文本文件
-         downLoadPodCastTask.performAutomationDownloadTasks(maxProcessCount,maxTryTimes,true, ModelType.DEEPSEEK,20);
+         downLoadPodCastTask.performAutomationDownloadTasks(maxProcessCount,maxTryTimes,true, ModelType.DEEPSEEK,20,maxDuplicatePages);
 
          //对于下载的文件，通过调用gemini的api来做翻译和中文摘要
          downLoadPodCastTask.processDownloadedFiles(downLoadPodCastTask.DOWNLOAD_DIR_CN,

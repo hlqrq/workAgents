@@ -127,7 +127,7 @@ public class DownLoadPodCastTask {
      * @param maxBatchSize 批量重命名时的每批文件数量
      */
     public void performAutomationDownloadTasks(int maxProcessCount, int maxTryTimes,
-        boolean onlyReadReadyPodCast, ModelType modelType, int maxBatchSize) {
+        boolean onlyReadReadyPodCast, ModelType modelType, int maxBatchSize,int maxDuplicatePages) {
         if (browser == null) {
             log("浏览器未连接，请先连接浏览器");
             return;
@@ -169,7 +169,7 @@ public class DownLoadPodCastTask {
 
                 if (!new File(FILELIST_FILE).exists()) {
                     log("执行处理节点列表");
-                    processNodeList(itemList, itemNameList, page, XPATH_PODCAST_ITEM, maxProcessCount, maxTryTimes);
+                    processNodeList(itemList, itemNameList, page, XPATH_PODCAST_ITEM, maxProcessCount, maxTryTimes,maxDuplicatePages);
                 } else {
                     log(FILELIST_FILE + " 文件列表文件已存在，跳过处理节点列表，直接进入文件下载流程");
                 }
@@ -240,12 +240,14 @@ public class DownLoadPodCastTask {
     }
 
     private void processNodeList(List<PodCastItem> itemList, List<String> itemNameList,
-                                 Page page, String preciseXpath, int maxProcessCount, int maxTryTimes) {
+                                 Page page, String preciseXpath, int maxProcessCount, int maxTryTimes,int maxDuplicatePages) {
         int validItemCount = 0;
         int tryTimes = 0;
         int lastProcessedIndex = 0;
         int consecutiveDuplicatePages = 0;
-        final int MAX_CONSECUTIVE_DUPLICATE_PAGES = 10;
+
+        if (maxDuplicatePages <=0)
+            maxDuplicatePages = 10;
 
         do {
             List<ElementHandle> elements = page.querySelectorAll(preciseXpath);
@@ -279,8 +281,8 @@ public class DownLoadPodCastTask {
                 if (!hasNewValidItemInThisBatch) {
                     consecutiveDuplicatePages++;
                     log("当前批次未发现新有效Item，连续空转次数: " + consecutiveDuplicatePages);
-                    if (consecutiveDuplicatePages >= MAX_CONSECUTIVE_DUPLICATE_PAGES) {
-                        log("连续 " + MAX_CONSECUTIVE_DUPLICATE_PAGES + " 次下拉未发现新数据，提前结束");
+                    if (consecutiveDuplicatePages >= maxDuplicatePages) {
+                        log("连续 " + maxDuplicatePages + " 次下拉未发现新数据，提前结束");
                         break;
                     }
                 } else {
