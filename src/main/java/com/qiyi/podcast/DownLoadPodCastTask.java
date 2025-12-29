@@ -5,6 +5,9 @@ import java.io.FileWriter;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 import com.microsoft.playwright.Browser;
 import com.microsoft.playwright.BrowserContext;
@@ -502,10 +505,14 @@ public class DownLoadPodCastTask {
      * @param downloadDirSummary 摘要输出目录
      */
     public void processDownloadedFiles(String downloadDir, String downloadDirSummary, String downloadDirImage,
-            int maxProcessCount, ModelType modelType, boolean needGenerateImage, boolean isStreamingProcess) 
+            int maxProcessCount, ModelType modelType, boolean needGenerateImage, boolean isStreamingProcess,int threadPoolSize) 
     {
         int processedCount = 0;
         int skipCount = 0;
+
+        if (threadPoolSize <= 0) {
+            threadPoolSize = 5;
+        }
         
         try {
             File dir = new File(downloadDir);
@@ -529,12 +536,17 @@ public class DownLoadPodCastTask {
             if (maxProcessCount == 0) {
                 maxProcessCount = files.length;
             }
+            final int finalMaxProcessCount = maxProcessCount;
+
+            // 使用线程池并行处理
+            
+            ExecutorService executor = Executors.newFixedThreadPool(threadPoolSize);
+            List<Future<?>> futures = new ArrayList<>();
 
             for (File pdfFile : files) {
-                if (processedCount >= maxProcessCount) break;
+                if (processedCount >= finalMaxProcessCount) break;
            
                 String pdfFileName = pdfFile.getName();
-                log("正在处理文件: " + pdfFileName);
 
                 String outputFileName = pdfFileName.replace(".pdf", "_summary.txt");
                 String outputFilePath = outputDir.getPath() + "/" + outputFileName;
@@ -544,18 +556,36 @@ public class DownLoadPodCastTask {
                     skipCount++;
                     log("摘要文件已存在，跳过: " + outputFileName);
                 } else {
-                    processSingleSummary(pdfFile, outputFile, modelType, isStreamingProcess);
                     processedCount++;
+                    final int currentProcessedCount = processedCount;
+                    final int currentSkipCount = skipCount;
+                    
+                    futures.add(executor.submit(() -> {
+                        log("正在处理文件: " + pdfFileName);
+                        processSingleSummary(pdfFile, outputFile, modelType, isStreamingProcess);
 
-                    log("最大处理文件数: " + maxProcessCount + 
-                    " ，已处理 " + processedCount + " 个文件，跳过 " 
-                    + skipCount + " 个文件，整个文件夹还剩 " + (files.length - processedCount - skipCount) + " 个文件");
-                }
+                        log("最大处理文件数: " + finalMaxProcessCount + 
+                        " ，已经处理完成第 " + currentProcessedCount + " 个任务，已跳过 " 
+                        + currentSkipCount + " 个文件，剩余待处理 " + (finalMaxProcessCount - currentProcessedCount)
+                        + "，文件目录中文件数量为: " + files.length);
 
-                if (needGenerateImage && outputFile.exists()) {
-                    PodCastUtil.generateImageWithGemini(outputFile.getAbsolutePath(), downloadDirImage, IMAGE_PROMPT);
+                        if (needGenerateImage && outputFile.exists()) {
+                            PodCastUtil.generateImageWithGemini(outputFile.getAbsolutePath(), downloadDirImage, IMAGE_PROMPT);
+                        }
+                    }));
                 }
             }
+            
+            // 等待所有任务完成
+            for (Future<?> future : futures) {
+                try {
+                    future.get();
+                } catch (Exception e) {
+                    log("任务执行异常: " + e.getMessage());
+                }
+            }
+            
+            executor.shutdown();
             log("所有文件处理完成");
 
         } catch (Exception e) {

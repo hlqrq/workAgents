@@ -38,6 +38,7 @@ public class PodwiseAutoMan {
         int maxProcessCount = 5;
         int maxTryTimes = 5;
         int downloadMaxProcessCount = 0;
+        int threadPoolSize = 5;
 
         // 从main入参读取上面的几个参数，支持提示后输入
         if (args.length >= 3) {
@@ -66,6 +67,12 @@ public class PodwiseAutoMan {
             if (!input.trim().isEmpty()) {
                 downloadMaxProcessCount = Integer.parseInt(input.trim());
             }
+            
+            System.out.print("请输入 threadPoolSize (默认 " + threadPoolSize + "): ");
+            input = scanner.nextLine();
+            if (!input.trim().isEmpty()) {
+                threadPoolSize = Integer.parseInt(input.trim());
+            }
         }
 
         // 执行自动化操作
@@ -82,7 +89,7 @@ public class PodwiseAutoMan {
          //对于下载的文件，通过调用gemini的api来做翻译和中文摘要
          downLoadPodCastTask.processDownloadedFiles(downLoadPodCastTask.DOWNLOAD_DIR_CN,
             downLoadPodCastTask.DOWNLOAD_DIR_SUMMARY,downLoadPodCastTask.DOWNLOAD_DIR_IMAGE,
-            downloadMaxProcessCount,ModelType.DEEPSEEK,false,true);
+            downloadMaxProcessCount,ModelType.DEEPSEEK,false,true,threadPoolSize);
 
 
 
