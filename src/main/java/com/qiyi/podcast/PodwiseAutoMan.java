@@ -45,12 +45,12 @@ public class PodwiseAutoMan {
          //downLoadPodCastTask.batchRenameChineseFiles(ModelType.DEEPSEEK, 30);
 
          //下载关注的播客节目的文本文件
-         //downLoadPodCastTask.performAutomationDownloadTasks(1,5,true, ModelType.DEEPSEEK,20);
+         downLoadPodCastTask.performAutomationDownloadTasks(5,5,true, ModelType.DEEPSEEK,20);
 
          //对于下载的文件，通过调用gemini的api来做翻译和中文摘要
          downLoadPodCastTask.processDownloadedFiles(downLoadPodCastTask.DOWNLOAD_DIR_CN,
             downLoadPodCastTask.DOWNLOAD_DIR_SUMMARY,downLoadPodCastTask.DOWNLOAD_DIR_IMAGE,
-            2,ModelType.DEEPSEEK,false,true);
+            1,ModelType.DEEPSEEK,false,true);
 
 
 

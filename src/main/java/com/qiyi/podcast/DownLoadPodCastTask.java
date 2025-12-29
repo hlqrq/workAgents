@@ -118,11 +118,13 @@ public class DownLoadPodCastTask {
      * 
      * @param maxProcessCount 最大处理（下载）的播客数量
      * @param maxTryTimes 列表加载最大重试次数
+     * @param maxPageCount 最大加载的页面数量
      * @param onlyReadReadyPodCast 是否只处理状态为 Ready 的播客
      * @param modelType 使用的模型类型（用于后续的文件名翻译等）
      * @param maxBatchSize 批量重命名时的每批文件数量
      */
-    public void performAutomationDownloadTasks(int maxProcessCount, int maxTryTimes, boolean onlyReadReadyPodCast, ModelType modelType, int maxBatchSize) {
+    public void performAutomationDownloadTasks(int maxProcessCount, int maxTryTimes,
+        boolean onlyReadReadyPodCast, ModelType modelType, int maxBatchSize) {
         if (browser == null) {
             log("浏览器未连接，请先连接浏览器");
             return;
@@ -239,6 +241,8 @@ public class DownLoadPodCastTask {
         int validItemCount = 0;
         int tryTimes = 0;
         int lastProcessedIndex = 0;
+        int consecutiveDuplicatePages = 0;
+        final int MAX_CONSECUTIVE_DUPLICATE_PAGES = 10;
 
         do {
             List<ElementHandle> elements = page.querySelectorAll(preciseXpath);
@@ -246,6 +250,7 @@ public class DownLoadPodCastTask {
 
             if (elements.size() > lastProcessedIndex) {
                 tryTimes = 0; // Reset retry count as we found new items
+                boolean hasNewValidItemInThisBatch = false;
 
                 for (int i = lastProcessedIndex; i < elements.size(); i++) {
                     if (validItemCount >= maxProcessCount) break;
@@ -258,6 +263,7 @@ public class DownLoadPodCastTask {
                             validItemCount++;
                             itemList.add(item);
                             itemNameList.add(item.title);
+                            hasNewValidItemInThisBatch = true;
                             log("找到有效Item: " + item.channelName + " - " + item.title + ",totalValid:" + validItemCount);
                         } else {
                             log("未处理Item: " + item.channelName + " - " + item.title);
@@ -266,6 +272,18 @@ public class DownLoadPodCastTask {
                         log("重复Item: " + item.channelName + " - " + item.title);
                     }
                 }
+                
+                if (!hasNewValidItemInThisBatch) {
+                    consecutiveDuplicatePages++;
+                    log("当前批次未发现新有效Item，连续空转次数: " + consecutiveDuplicatePages);
+                    if (consecutiveDuplicatePages >= MAX_CONSECUTIVE_DUPLICATE_PAGES) {
+                        log("连续 " + MAX_CONSECUTIVE_DUPLICATE_PAGES + " 次下拉未发现新数据，提前结束");
+                        break;
+                    }
+                } else {
+                    consecutiveDuplicatePages = 0;
+                }
+
                 lastProcessedIndex = elements.size();
             } else {
                 tryTimes++;
@@ -487,6 +505,8 @@ public class DownLoadPodCastTask {
             int maxProcessCount, ModelType modelType, boolean needGenerateImage, boolean isStreamingProcess) 
     {
         int processedCount = 0;
+        int skipCount = 0;
+        
         try {
             File dir = new File(downloadDir);
             File outputDir = new File(downloadDirSummary);
@@ -508,19 +528,22 @@ public class DownLoadPodCastTask {
 
             for (File pdfFile : files) {
                 if (processedCount >= maxProcessCount) break;
-
-                processedCount++;
+           
                 String pdfFileName = pdfFile.getName();
                 log("正在处理文件: " + pdfFileName);
 
-                String outputFileName = pdfFileName.replace(".pdf", "[_summary].txt");
+                String outputFileName = pdfFileName.replace(".pdf", "_summary.txt");
                 String outputFilePath = outputDir.getPath() + "/" + outputFileName;
                 File outputFile = new File(outputFilePath);
 
                 if (outputFile.exists()) {
+                    skipCount++;
                     log("摘要文件已存在，跳过: " + outputFileName);
                 } else {
                     processSingleSummary(pdfFile, outputFile, modelType, isStreamingProcess);
+                    processedCount++;
+
+                    log("已处理 " + processedCount + " 个文件，跳过 " + skipCount + " 个文件，还剩 " + (files.length - processedCount - skipCount) + " 个文件");
                 }
 
                 if (needGenerateImage && outputFile.exists()) {
