@@ -35,10 +35,10 @@ public class PodwiseAutoMan {
         
         PodwiseAutoMan autoMan = new PodwiseAutoMan();
 
-        int maxProcessCount = 5;
-        int maxTryTimes = 5;
+        int maxProcessCount = 50;
+        int maxTryTimes = 7;
         int downloadMaxProcessCount = 0;
-        int threadPoolSize = 5;
+        int threadPoolSize = 15;
         int maxDuplicatePages = 10;
 
         // 从main入参读取上面的几个参数，支持提示后输入
@@ -80,7 +80,14 @@ public class PodwiseAutoMan {
         
 
         // 执行自动化操作
-        autoMan.connectAndAutomate();
+        PlayWrightUtil.Connection connection = PlayWrightUtil.connectAndAutomate();
+        if (connection != null) {
+            autoMan.playwright = connection.playwright;
+            autoMan.browser = connection.browser;
+        } else {
+            System.out.println("无法连接到浏览器，程序退出");
+            return;
+        }
 
         //下载关注的播客节目的文本文件
          DownLoadPodCastTask downLoadPodCastTask = new DownLoadPodCastTask(autoMan.browser,"/Users/cenwenchu/Desktop/podCastItems/");
@@ -103,65 +110,8 @@ public class PodwiseAutoMan {
         //addPodCastTask.addPodCast(podCastNames);
 
          
-         autoMan.disconnectBrowser();
+         PlayWrightUtil.disconnectBrowser(autoMan.playwright, autoMan.browser);
 
 	}
-
-    /**
-     * 连接到现有 Chrome 实例，如果不存在则启动新实例
-     */
-    public void connectAndAutomate() {
-        
-        try {
-            playwright = Playwright.create();
-            
-            // 1. 获取 Chrome 的 WebSocket 调试 URL
-            String wsEndpoint = PodCastUtil.getChromeWsEndpoint(9222);
-            
-            if (wsEndpoint == null) {
-                
-                PodCastUtil.startChromeBrowser();
-
-                wsEndpoint = PodCastUtil.getChromeWsEndpoint(9222);
-
-                if (wsEndpoint == null) 
-                {
-                    System.out.println("未找到运行的 Chrome 实例，请先以调试模式启动 Chrome");
-                    System.out.println("启动命令：chrome --remote-debugging-port=9222");
-
-                    return;
-                }
-                
-            }
-            
-            System.out.println("连接到: " + wsEndpoint);
-            
-            // 2. 连接到现有浏览器
-            browser = playwright.chromium().connectOverCDP(wsEndpoint);
-                 
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-    }
-
-
-    /**
-     * 断开与浏览器的连接并清理相关进程
-     */
-    public void disconnectBrowser() {
-        if (browser != null) {
-            try {
-                browser.close();
-            } catch (Exception e) {
-                System.out.println("关闭浏览器连接失败: " + e.getMessage());
-            }
-        }
-
-        if (playwright != null) {
-                playwright.close();
-            }
-
-        PodCastUtil.killChromeProcess(9222);
-    }
 
 }

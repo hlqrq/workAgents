@@ -22,7 +22,7 @@ public class DownLoadPodCastTask {
 
     // Constants
     private static final String DEFAULT_DOWNLOAD_DIR = "/Users/cenwenchu/Desktop/podCastItems/";
-    private static final int DEFAULT_TIMEOUT_MS = 60000;
+    private static final int DEFAULT_TIMEOUT_MS = 5*60*1000;
     private static final int SHORT_TIMEOUT_MS = 5000;
 
     // Prompts
@@ -135,6 +135,8 @@ public class DownLoadPodCastTask {
 
         BrowserContext context = browser.contexts().isEmpty() ? browser.newContext() : browser.contexts().get(0);
         Page page = context.newPage();
+        page.setDefaultTimeout(DEFAULT_TIMEOUT_MS);
+
         log("创建新页面");
 
         try {

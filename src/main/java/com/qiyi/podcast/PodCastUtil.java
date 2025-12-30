@@ -93,6 +93,21 @@ public class PodCastUtil {
         }
     }
 
+    public static boolean isWechatLoggedIn(Page page) {
+        try {
+            //尝试点击一下登录按钮，看是否会有弹窗
+            page.click("//a[contains(text(),'登录')]");
+            //等待页面加载完毕
+            page.waitForLoadState(LoadState.NETWORKIDLE);
+
+            // 检查是否有登录状态的元素
+            ElementHandle userElement = page.querySelector("//div/span[contains(@class,'acount_box-nickname')]");
+            return userElement != null;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     /**
      * 暂停程序等待用户在浏览器中手动完成登录
      * 
@@ -617,6 +632,32 @@ public class PodCastUtil {
             e.printStackTrace();
         }
         return itemList;
+    }
+
+
+    /**
+     * 从播客文件中提取微信公众号文章信息
+     * 
+     * @param podcastFilePath 播客文件路径
+     * @return 微信公众号文章对象
+     */
+    public static WechatArticle generateWechatArticleFromDeepseek(String podcastFilePath) {
+
+        WechatArticle article = new WechatArticle();
+
+        article.setAuthor("放翁");
+        article.setTitle("放翁的播客"); 
+        article.setSummary("放翁的播客摘要。");
+        article.setContent("放翁的播客，分享技术、生活、思考等内容。");
+        article.setCategory("科技");
+
+        // String podcastContent = readFileToString(podcastFilePath);
+        // String prompt = String.format(DEEPSEEK_PROMPT_TEMPLATE, podcastContent);
+        // String responseText = chatWithDeepSeek(prompt);
+        
+        // article = parseWechatArticleFromResponse(responseText);
+
+        return article;
     }
 
 }
