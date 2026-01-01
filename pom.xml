@@ -5,10 +5,10 @@
   <modelVersion>4.0.0</modelVersion>
 
   <groupId>com.qiyi</groupId>
-  <artifactId>playwrightdemo</artifactId>
+  <artifactId>workAgents</artifactId>
   <version>1.0-SNAPSHOT</version>
 
-  <name>playwrightdemo</name>
+  <name>workAgents</name>
   <!-- FIXME change it to the project's website -->
 
   <repositories>
