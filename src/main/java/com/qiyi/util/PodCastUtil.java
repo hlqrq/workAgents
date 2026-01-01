@@ -1,4 +1,4 @@
-package com.qiyi.podcast;
+package com.qiyi.util;
 
 import java.io.BufferedReader;
 import java.io.FileReader;
@@ -33,6 +33,8 @@ import com.google.genai.types.UploadFileConfig;
 import com.microsoft.playwright.ElementHandle;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.options.LoadState;
+import com.qiyi.podcast.PodCastItem;
+import com.qiyi.wechat.WechatArticle;
 
 import io.github.pigmesh.ai.deepseek.core.DeepSeekClient;
 import io.github.pigmesh.ai.deepseek.core.OpenAiClient.OpenAiClientContext;

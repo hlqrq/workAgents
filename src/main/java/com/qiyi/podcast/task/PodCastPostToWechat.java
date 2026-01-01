@@ -1,4 +1,4 @@
-package com.qiyi.podcast;
+package com.qiyi.podcast.task;
 
 import java.io.IOException;
 
@@ -6,8 +6,11 @@ import com.microsoft.playwright.Browser;
 import com.microsoft.playwright.BrowserContext;
 import com.microsoft.playwright.ElementHandle;
 import com.microsoft.playwright.Page;
+import com.qiyi.util.PlayWrightUtil;
+import com.qiyi.util.PodCastUtil;
+import com.qiyi.wechat.WechatArticle;
 
-public class PodCastToWechat {
+public class PodCastPostToWechat {
 
     private Browser browser;
     private static final int DEFAULT_TIMEOUT_MS = 60*1000;
@@ -31,7 +34,7 @@ public class PodCastToWechat {
             return;
         }
 
-        PodCastToWechat task = new PodCastToWechat(connection.browser);
+        PodCastPostToWechat task = new PodCastPostToWechat(connection.browser);
 
 
         // 从 publishPodcastDir 目录下，读取所有文件，然后分别发送到微信公众号
@@ -49,7 +52,7 @@ public class PodCastToWechat {
         PlayWrightUtil.disconnectBrowser(connection.playwright, connection.browser);
     }
 
-    public PodCastToWechat(Browser browser) {
+    public PodCastPostToWechat(Browser browser) {
         this.browser = browser;
     }
 

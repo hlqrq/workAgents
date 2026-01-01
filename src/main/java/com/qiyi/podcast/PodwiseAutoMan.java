@@ -8,6 +8,8 @@ import java.io.IOException;
 
 import com.microsoft.playwright.Browser;
 import com.microsoft.playwright.Playwright;
+import com.qiyi.podcast.task.DownLoadPodCast;
+import com.qiyi.util.PlayWrightUtil;
 
 //先要运行这个启动可信任浏览器
 //nohup /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --remote-debugging-port=9222 --user-data-dir="/tmp/chrome-debug" > /tmp/chrome-debug.log 2>&1 &
@@ -89,7 +91,7 @@ public class PodwiseAutoMan {
         }
 
         //下载关注的播客节目的文本文件
-         DownLoadPodCastTask downLoadPodCastTask = new DownLoadPodCastTask(autoMan.browser,"/Users/cenwenchu/Desktop/podCastItems/");
+         DownLoadPodCast downLoadPodCastTask = new DownLoadPodCast(autoMan.browser,"/Users/cenwenchu/Desktop/podCastItems/");
          
          //downLoadPodCastTask.batchRenameChineseFiles(ModelType.DEEPSEEK, 30);
 

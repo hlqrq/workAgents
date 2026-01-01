@@ -1,4 +1,4 @@
-package com.qiyi.podcast;
+package com.qiyi.wechat;
 
 public class WechatArticle {
 

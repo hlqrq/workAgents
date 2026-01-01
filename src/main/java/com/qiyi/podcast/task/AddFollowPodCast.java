@@ -1,4 +1,4 @@
-package com.qiyi.podcast;
+package com.qiyi.podcast.task;
 
 
 import com.microsoft.playwright.Browser;
@@ -6,14 +6,15 @@ import com.microsoft.playwright.BrowserContext;
 import com.microsoft.playwright.ElementHandle;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.options.LoadState;
+import com.qiyi.util.PodCastUtil;
 
-public class AddPodCastTask {
+public class AddFollowPodCast {
 
     Browser browser = null;
 
     String  searchUrl = "https://podwise.ai/dashboard/search";
 
-    public AddPodCastTask(Browser browser) {
+    public AddFollowPodCast(Browser browser) {
         this.browser = browser;
     }
 

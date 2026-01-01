@@ -1,4 +1,4 @@
-package com.qiyi.podcast;
+package com.qiyi.podcast.task;
 
 import java.io.File;
 import java.io.FileWriter;
@@ -15,10 +15,12 @@ import com.microsoft.playwright.Download;
 import com.microsoft.playwright.ElementHandle;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.options.LoadState;
-
+import com.qiyi.podcast.PodCastItem;
+import com.qiyi.podcast.PodwiseAutoMan;
 import com.qiyi.podcast.PodwiseAutoMan.ModelType;
+import com.qiyi.util.PodCastUtil;
 
-public class DownLoadPodCastTask {
+public class DownLoadPodCast {
 
     // Constants
     private static final String DEFAULT_DOWNLOAD_DIR = "/Users/cenwenchu/Desktop/podCastItems/";
@@ -106,7 +108,7 @@ public class DownLoadPodCastTask {
     public String DOWNLOAD_DIR_IMAGE;
     public String FILELIST_FILE;
 
-    public DownLoadPodCastTask(Browser browser, String downloadSaveDir) {
+    public DownLoadPodCast(Browser browser, String downloadSaveDir) {
         this.browser = browser;
         this.DOWNLOAD_DIR_TOP = (downloadSaveDir != null) ? downloadSaveDir : DEFAULT_DOWNLOAD_DIR;
         this.DOWNLOAD_DIR_ORIGINAL = this.DOWNLOAD_DIR_TOP + "original/";
