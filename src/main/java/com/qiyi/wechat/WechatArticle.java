@@ -56,5 +56,18 @@ public class WechatArticle {
     public void setCategory(String category) {
         this.category = category;
     }
+
+    @Override
+    public String toString() {
+        return "WechatArticle{" +
+                "title='" + title + '\'' +
+                ", author='" + author + '\'' +
+                ", content='" + content + '\'' +
+                ", coverImagePath='" + coverImagePath + '\'' +
+                ", summary='" + summary + '\'' +
+                ", category='" + category + '\'' +
+                '}';
+    }
+    
     
 }

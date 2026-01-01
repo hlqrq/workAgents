@@ -19,6 +19,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.qiyi.dingtalk.DingTalkDepartment;
 import com.qiyi.dingtalk.DingTalkUser;
 import com.qiyi.podcast.tools.PodCastPostToWechat;
+import com.taobao.api.FileItem;
 import com.aliyun.dingtalkoauth2_1_0.models.GetAccessTokenResponse;
 import com.aliyun.dingtalkrobot_1_0.models.*;
 import com.aliyun.tea.TeaException;
@@ -39,6 +40,9 @@ import java.util.stream.Collectors;
 import com.aliyun.teaopenapi.models.Config;
 import com.aliyun.teautil.models.RuntimeOptions;
 
+//机器人方面的配置，可以参考这里：最好是企业机器人 https://open-dev.dingtalk.com/fe/app?hash=%23%2Fcorp%2Fapp#/corp/app
+//接口方面的说明可以参考这里：https://open.dingtalk.com/document/development/development-basic-concepts
+
 public class DingTalkUtil {
 
     // 机器人配置信息（从配置文件加载）
@@ -49,6 +53,7 @@ public class DingTalkUtil {
     private static String ROBOT_CLIENT_SECRET = "";
 
     private static String ROBOT_CODE = "";
+    private static Long AGENT_ID = 0L; // AgentId 用于发送工作通知（如本地图片）
     private static String PODCAST_PUBLISH_DIR = "";
     private static List<String> PODCAST_ADMIN_USERS = new ArrayList<>();
 
@@ -75,6 +80,13 @@ public class DingTalkUtil {
             ROBOT_CLIENT_ID = props.getProperty("dingtalk.robot.client.id");
             ROBOT_CLIENT_SECRET = props.getProperty("dingtalk.robot.client.secret");
             ROBOT_CODE = props.getProperty("dingtalk.robot.code");
+            if (props.containsKey("dingtalk.agent.id")) {
+                try {
+                    AGENT_ID = Long.parseLong(props.getProperty("dingtalk.agent.id"));
+                } catch (NumberFormatException e) {
+                    System.err.println("Invalid dingtalk.agent.id format");
+                }
+            }
         }
         
         if (props.containsKey("podcast.publish.dir")) {
@@ -236,12 +248,67 @@ public class DingTalkUtil {
                      com.microsoft.playwright.BrowserContext context = connection.browser.contexts().isEmpty() ? 
                              connection.browser.newContext() : connection.browser.contexts().get(0);
                      com.microsoft.playwright.Page checkPage = context.newPage();
+                     // 设置大视口，确保截图清晰
+                     checkPage.setViewportSize(1920, 1080);
                      try {
                          checkPage.navigate(PodCastPostToWechat.WECHAT_LOGIN_URL);
                          checkPage.waitForLoadState(com.microsoft.playwright.options.LoadState.NETWORKIDLE);
                          if (!PodCastUtil.isWechatLoggedIn(checkPage)) {
-                             sendTextMessageToEmployees(notifyUsers, "检测到微信公众号未登录，请及时在服务器浏览器完成扫码登录，任务将继续执行等待。");
-                         }
+                            sendTextMessageToEmployees(notifyUsers, "检测到微信公众号未登录，请及时在服务器浏览器完成扫码登录，任务将继续执行等待。");
+                            
+                            // 尝试截图并发送 (需配置 dingtalk.agent.id)
+                            if (AGENT_ID != 0) {
+                                try {
+                                    // 增加等待时间，确保二维码完全加载
+                                    checkPage.waitForTimeout(3000); 
+                                    
+                                    String fileName = "login_screenshot_" + System.currentTimeMillis() + ".png";
+                                    java.nio.file.Path screenshotPath = java.nio.file.Paths.get(PODCAST_PUBLISH_DIR, fileName);
+                                    
+                                    // 尝试定位登录框截图，清晰度更高
+                                    com.microsoft.playwright.Locator loginFrame = checkPage.locator(".login_frame");
+                                    if (loginFrame.isVisible()) {
+                                        loginFrame.screenshot(new com.microsoft.playwright.Locator.ScreenshotOptions().setPath(screenshotPath));
+                                    } else {
+                                        checkPage.screenshot(new com.microsoft.playwright.Page.ScreenshotOptions().setPath(screenshotPath));
+                                    }
+                                    
+                                    String mediaId = uploadMedia(ROBOT_CLIENT_ID, ROBOT_CLIENT_SECRET, screenshotPath.toFile());
+
+                                    sendAsyncWorkTextMessage(notifyUsers, "微信公众号未登录，请扫描下方二维码进行登录： --" + System.currentTimeMillis());
+                                    sendAsyncWorkImageMessage(notifyUsers, mediaId);
+                                    
+                                    // 上传成功后删除本地文件
+                                    screenshotPath.toFile().delete();
+                                } catch (Exception e) {
+                                    System.err.println("Failed to capture and send screenshot: " + e.getMessage());
+                                    e.printStackTrace();
+                                }
+                            }
+                            
+                            // 阻塞等待用户扫码登录
+                            long maxWaitTime = 5 * 60 * 1000; // 5分钟超时
+                            long startTime = System.currentTimeMillis();
+                            boolean isLogged = false;
+                            
+                            while (!isLogged) {
+                                if (System.currentTimeMillis() - startTime > maxWaitTime) {
+                                    sendTextMessageToEmployees(notifyUsers, "微信登录超时，任务终止。");
+                                    return;
+                                }
+                                
+                                try {
+                                    Thread.sleep(3000);
+                                } catch (InterruptedException e) {
+                                    Thread.currentThread().interrupt();
+                                    sendTextMessageToEmployees(notifyUsers, "等待登录被中断，任务终止。");
+                                    return;
+                                }
+                                isLogged = PodCastUtil.isWechatLoggedIn(checkPage);
+                            }
+                            
+                            sendTextMessageToEmployees(notifyUsers, "微信登录成功，继续执行任务。");
+                        }
                      } finally {
                          if (!checkPage.isClosed()) {
                              checkPage.close();
@@ -360,6 +427,201 @@ public class DingTalkUtil {
             e.printStackTrace();
         }
         return atUserIds;
+    }
+
+    // =========================================================================
+    // 异步消息发送队列支持
+    // =========================================================================
+
+    public enum MsgType {
+        TEXT, IMAGE, LINK, WORK_IMAGE, WORK_TEXT
+    }
+
+    private static class DingTalkMessageTask {
+        List<String> userIds;
+        MsgType type;
+        String content; // text content or image url or mediaId
+        String title; // for link message
+        String messageUrl; // for link message
+        String picUrl; // for link message
+
+        public DingTalkMessageTask(List<String> userIds, MsgType type, String content) {
+            this.userIds = userIds;
+            this.type = type;
+            this.content = content;
+        }
+
+        // For Link Message (Text + Image)
+        public DingTalkMessageTask(List<String> userIds, String title, String text, String messageUrl, String picUrl) {
+            this.userIds = userIds;
+            this.type = MsgType.LINK;
+            this.title = title;
+            this.content = text;
+            this.messageUrl = messageUrl;
+            this.picUrl = picUrl;
+        }
+    }
+
+    private static final java.util.concurrent.BlockingQueue<DingTalkMessageTask> messageQueue = new java.util.concurrent.LinkedBlockingQueue<>();
+    
+    static {
+        Thread messageProcessorThread = new Thread(() -> {
+            System.out.println("DingTalk-Async-Msg-Processor started.");
+            while (true) {
+                try {
+                    DingTalkMessageTask task = messageQueue.take(); // 阻塞获取
+                    // System.out.println("Processing async dingtalk task: " + task.type);
+                    processMessageTask(task);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    System.out.println("DingTalk-Async-Msg-Processor interrupted.");
+                    break;
+                } catch (Throwable e) {
+                    System.err.println("Error processing DingTalk message task: " + e.getMessage());
+                    e.printStackTrace();
+                }
+            }
+        });
+        messageProcessorThread.setDaemon(true);
+        messageProcessorThread.setName("DingTalk-Async-Msg-Processor");
+        messageProcessorThread.start();
+    }
+
+    private static void processMessageTask(DingTalkMessageTask task) {
+        try {
+            if (task.userIds == null || task.userIds.isEmpty()) return;
+
+            if (task.type == MsgType.TEXT) {
+                sendTextMessageToEmployees(task.userIds, task.content);
+            } else if (task.type == MsgType.IMAGE) {
+                sendImageMessageToEmployees(task.userIds, task.content);
+            } else if (task.type == MsgType.LINK) {
+                sendLinkMessageToEmployees(task.userIds, task.title, task.content, task.messageUrl, task.picUrl);
+            } else if (task.type == MsgType.WORK_IMAGE) {
+                sendWorkNotificationImage(task.userIds, task.content); // content is mediaId
+            } else if (task.type == MsgType.WORK_TEXT) {
+                sendWorkNotificationText(task.userIds, task.content);
+            }
+            
+            // 简单的限流，避免触发钉钉频率限制
+            Thread.sleep(200); 
+        } catch (Exception e) {
+            System.err.println("Failed to send async message: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+    /**
+     * 异步发送文本消息
+     * 将消息放入队列，由后台线程逐条发送
+     */
+    public static void sendAsyncTextMessage(List<String> userIds, String content) {
+        if (userIds == null || userIds.isEmpty()) return;
+        messageQueue.offer(new DingTalkMessageTask(userIds, MsgType.TEXT, content));
+    }
+
+    /**
+     * 异步发送图片消息 (基于公网URL)
+     * 将消息放入队列，由后台线程逐条发送
+     */
+    public static void sendAsyncImageMessage(List<String> userIds, String photoUrl) {
+        if (userIds == null || userIds.isEmpty()) return;
+        messageQueue.offer(new DingTalkMessageTask(userIds, MsgType.IMAGE, photoUrl));
+    }
+
+    /**
+     * 异步发送工作通知图片消息 (基于 MediaId)
+     * 将消息放入队列，由后台线程逐条发送
+     */
+    public static void sendAsyncWorkImageMessage(List<String> userIds, String mediaId) {
+        if (userIds == null || userIds.isEmpty()) return;
+        messageQueue.offer(new DingTalkMessageTask(userIds, MsgType.WORK_IMAGE, mediaId));
+    }
+
+    /**
+     * 异步发送工作通知文本消息
+     * 将消息放入队列，由后台线程逐条发送
+     */
+    public static void sendAsyncWorkTextMessage(List<String> userIds, String content) {
+        if (userIds == null || userIds.isEmpty()) return;
+        messageQueue.offer(new DingTalkMessageTask(userIds, MsgType.WORK_TEXT, content));
+    }
+
+    /**
+     * 异步发送图文链接消息 (支持文本+图片)
+     * 将消息放入队列，由后台线程逐条发送
+     * @param userIds 接收人列表
+     * @param title 消息标题
+     * @param text 消息摘要文本
+     * @param messageUrl 点击消息跳转的URL
+     * @param picUrl 图片URL
+     */
+    public static void sendAsyncLinkMessage(List<String> userIds, String title, String text, String messageUrl, String picUrl) {
+        if (userIds == null || userIds.isEmpty()) return;
+        messageQueue.offer(new DingTalkMessageTask(userIds, title, text, messageUrl, picUrl));
+    }
+
+    public static String uploadMedia(String appKey, String appSecret, java.io.File file) throws Exception {
+        com.dingtalk.api.DefaultDingTalkClient client = new com.dingtalk.api.DefaultDingTalkClient("https://oapi.dingtalk.com/media/upload");
+        com.dingtalk.api.request.OapiMediaUploadRequest req = new com.dingtalk.api.request.OapiMediaUploadRequest();
+        req.setType("image");
+        req.setMedia(new FileItem(file));
+        String accessToken = getDingTalkRobotAccessToken(appKey, appSecret);
+        com.dingtalk.api.response.OapiMediaUploadResponse rsp = client.execute(req, accessToken);
+        if (rsp.getErrcode() == 0) {
+            return rsp.getMediaId();
+        }
+        throw new RuntimeException("Media upload failed: " + rsp.getErrmsg());
+    }
+
+    public static void sendWorkNotificationImage(List<String> userIds, String mediaId) throws Exception {
+        if (AGENT_ID == 0) {
+            System.out.println("Agent ID not configured, cannot send work notification image.");
+            return;
+        }
+
+        // 2. 发送图片
+        com.dingtalk.api.DefaultDingTalkClient client = new com.dingtalk.api.DefaultDingTalkClient("https://oapi.dingtalk.com/topapi/message/corpconversation/asyncsend_v2");
+        com.dingtalk.api.request.OapiMessageCorpconversationAsyncsendV2Request req = new com.dingtalk.api.request.OapiMessageCorpconversationAsyncsendV2Request();
+        req.setAgentId(AGENT_ID);
+        req.setUseridList(String.join(",", userIds));
+        
+        com.dingtalk.api.request.OapiMessageCorpconversationAsyncsendV2Request.Msg msg = new com.dingtalk.api.request.OapiMessageCorpconversationAsyncsendV2Request.Msg();
+        msg.setMsgtype("image");
+        msg.setImage(new com.dingtalk.api.request.OapiMessageCorpconversationAsyncsendV2Request.Image());
+        msg.getImage().setMediaId(mediaId);
+        req.setMsg(msg);
+        
+        String accessToken = getDingTalkRobotAccessToken(ROBOT_CLIENT_ID, ROBOT_CLIENT_SECRET);
+        com.dingtalk.api.response.OapiMessageCorpconversationAsyncsendV2Response rsp = client.execute(req, accessToken);
+        if (rsp.getErrcode() != 0) {
+             throw new RuntimeException("Send work notification image failed: " + rsp.getErrmsg());
+        }
+    }
+
+    //注意，如果文本内容曾经发过，钉钉会有机制来保障不重发，因此注意不要始终发相同的内容
+    private static void sendWorkNotificationText(List<String> userIds, String content) throws Exception {
+         if (AGENT_ID == 0) return;
+         com.dingtalk.api.DefaultDingTalkClient client = new com.dingtalk.api.DefaultDingTalkClient("https://oapi.dingtalk.com/topapi/message/corpconversation/asyncsend_v2");
+         com.dingtalk.api.request.OapiMessageCorpconversationAsyncsendV2Request req = new com.dingtalk.api.request.OapiMessageCorpconversationAsyncsendV2Request();
+         req.setAgentId(AGENT_ID);
+         req.setUseridList(String.join(",", userIds));
+         
+         com.dingtalk.api.request.OapiMessageCorpconversationAsyncsendV2Request.Msg msg = new com.dingtalk.api.request.OapiMessageCorpconversationAsyncsendV2Request.Msg();
+         msg.setMsgtype("text");
+         msg.setText(new com.dingtalk.api.request.OapiMessageCorpconversationAsyncsendV2Request.Text());
+         msg.getText().setContent(content);
+         req.setMsg(msg);
+         
+         String accessToken = getDingTalkRobotAccessToken(ROBOT_CLIENT_ID, ROBOT_CLIENT_SECRET);
+         com.dingtalk.api.response.OapiMessageCorpconversationAsyncsendV2Response rsp = client.execute(req, accessToken);
+         
+         if (rsp.getErrcode() != 0) {
+             System.err.println("Send work notification text failed: " + rsp.getErrmsg() + ", code: " + rsp.getErrcode());
+             throw new RuntimeException("Send work notification text failed: " + rsp.getErrmsg());
+         } else {
+             System.out.println("Send work notification text success. TaskId: " + rsp.getTaskId());
+         }
     }
 
     public static com.aliyun.dingtalkrobot_1_0.Client createClient() throws Exception {
