@@ -2,7 +2,10 @@ package com.qiyi;
 
 import com.microsoft.playwright.BrowserContext;
 import com.microsoft.playwright.Page;
+import com.qiyi.podcast.ModelType;
+import com.qiyi.podcast.service.FileService;
 import com.qiyi.podcast.tools.PodCastPostToWechat;
+import com.qiyi.util.PFileUtil;
 import com.qiyi.util.PlayWrightUtil;
 import com.qiyi.wechat.WechatArticle;
 
@@ -10,6 +13,11 @@ public class PodCastToWechatTaskTest {
 
     
     public static void main(String[] args) throws Exception {
+
+        FileService fileService = new FileService();
+        ModelType modelType = ModelType.DEEPSEEK;
+
+        PFileUtil.batchRenameChineseFiles(fileService.getDownloadDirSummary(),modelType, 50);
 
         // 执行自动化操作
         PlayWrightUtil.Connection connection = PlayWrightUtil.connectAndAutomate();

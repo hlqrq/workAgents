@@ -43,7 +43,7 @@ public class PFileUtil {
         }
     }
 
-    private static void processBatchRename(List<File> files, String fileListStr, ModelType modelType) {
+    public static void processBatchRename(List<File> files, String fileListStr, ModelType modelType) {
         try {
             String prompt = RENAME_PROMPT + fileListStr;
             String response = "";

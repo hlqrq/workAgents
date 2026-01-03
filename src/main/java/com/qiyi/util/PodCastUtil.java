@@ -538,6 +538,8 @@ public class PodCastUtil {
         DeepSeekClient deepseekClient = new DeepSeekClient.Builder()
             .openAiApiKey(AppConfig.getInstance().getDeepSeekApiKey())
             .baseUrl("https://api.deepseek.com")
+            .connectTimeout(java.time.Duration.ofSeconds(120))
+            .readTimeout(java.time.Duration.ofSeconds(600))
             .model("deepseek-chat")
             .build();
 
@@ -670,7 +672,7 @@ public class PodCastUtil {
         String content = generateContentWithDeepSeekByFile(new java.io.File(podcastFilePath),promptString,true);
 
 
-        System.out.println(content);
+        //System.out.println(content);
 
         WechatArticle article =  parseFromString(content);
         article.setAuthor("Curcuma");
