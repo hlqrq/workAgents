@@ -10,7 +10,6 @@ import com.microsoft.playwright.ElementHandle;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.options.ScreenshotScale;
 import com.qiyi.util.DingTalkUtil;
-import com.qiyi.util.PlayWrightUtil;
 import com.qiyi.util.PodCastUtil;
 import com.qiyi.wechat.WechatArticle;
 
@@ -20,50 +19,6 @@ public class PodCastPostToWechat {
     private static final int DEFAULT_TIMEOUT_MS = 30*1000;
     public static final String SUCCESS_MSG = "成功发布:";
     public static final String WECHAT_LOGIN_URL = "https://mp.weixin.qq.com/cgi-bin/home";
-
-
-    public static void main(String[] args) throws IOException {
-
-        // 支持从命令行里面输入 publishPodcastDir，通过交互的方式提示用户输入
-        String publishPodcastDir = "/Users/cenwenchu/Desktop/podCastItems/publish/";
-        java.util.Scanner scanner = new java.util.Scanner(System.in);
-        System.out.print("请输入 播客发布目录 (默认 " + publishPodcastDir + "): ");
-        String input = scanner.nextLine();
-        if (!input.trim().isEmpty()) {
-            publishPodcastDir = input.trim();
-        }
-        
-        // 执行自动化操作
-        PlayWrightUtil.Connection connection = PlayWrightUtil.connectAndAutomate();
-        if (connection == null){
-            System.out.println("无法连接到浏览器，程序退出");
-            return;
-        }
-
-        PodCastPostToWechat task = new PodCastPostToWechat(connection.browser);
-
-
-        // 从 publishPodcastDir 目录下，读取所有文件，然后分别发送到微信公众号
-        java.util.List<String> podcastFilePaths = java.nio.file.Files.walk(java.nio.file.Paths.get(publishPodcastDir))
-            .filter(p -> java.nio.file.Files.isRegularFile(p))
-            .map(p -> p.toString())
-            .collect(java.util.stream.Collectors.toList());
-        
-        // 发布播客到微信公众号
-        for (String podcastFilePath : podcastFilePaths) {
-            try
-            {
-                task.publishPodcastToWechat(podcastFilePath, true);
-            }
-            catch(Exception ex){
-                System.out.println("发布播客到微信公众号失败：" + podcastFilePath);
-                ex.printStackTrace();
-            }
-        }
-
-        // 断开浏览器连接
-        PlayWrightUtil.disconnectBrowser(connection.playwright, connection.browser);
-    }
 
     public PodCastPostToWechat(Browser browser) {
         this.browser = browser;
@@ -323,13 +278,26 @@ public class PodCastPostToWechat {
 
             try
             {
-                page.waitForSelector("//div[@class='weui-desktop-block'][.//a/span[contains(text(),'" + article.getTitle() + "')] and .//span[contains(text(),'已发表')]]", 
+                ElementHandle publishedArticle = page.waitForSelector("//div[@class='weui-desktop-block'][.//a/span[contains(text(),'" + article.getTitle().trim() + "')] and .//span[contains(text(),'已发表')]]", 
                     new Page.WaitForSelectorOptions().setTimeout(DEFAULT_TIMEOUT_MS*4));
+
+                try
+                {
+                    String articleUrl = publishedArticle.querySelector("a.weui-desktop-mass-appmsg__title").getAttribute("href");
+                    result += " ，文章网页地址：" + articleUrl;
+                }
+                catch(Exception ex){
+                    log("获取文章网页地址失败：" + article.getTitle());
+                    result = "获取文章网页地址失败：" + article.getTitle();
+                    ex.printStackTrace();
+                }
+                
                 log("发布文章成功：" + article.getTitle());
             }
             catch(Exception ex){
                 log("没有新的发布内容：" + article.getTitle());
                 result = "没有新的发布内容：" + article.getTitle();
+                ex.printStackTrace();
             }
         } 
 

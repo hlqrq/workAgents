@@ -17,6 +17,8 @@ public class AppConfig {
     public static final String KEY_DINGTALK_CLIENT_SECRET = "dingtalk.robot.client.secret";
     public static final String KEY_DINGTALK_CODE = "dingtalk.robot.code";
     public static final String KEY_PODCAST_PUBLISH_DIR = "podcast.publish.dir";
+    public static final String KEY_PODCAST_PUBLISHED_DIR = "podcast.published.dir";
+    public static final String KEY_PODCAST_PUBLISH_BATCH_SIZE = "podcast.publish.batch.size";
     public static final String KEY_PODCAST_DOWNLOAD_DIR = "podcast.download.dir";
     public static final String KEY_ADMIN_USERS = "podcast.admin.users";
     public static final String KEY_DINGTALK_AGENT_ID = "dingtalk.agent.id";
@@ -25,6 +27,7 @@ public class AppConfig {
     // Default Values
     public static final String DEFAULT_DOWNLOAD_DIR = "/tmp/podCastItems/";
     public static final int DEFAULT_CHROME_DEBUG_PORT = 9222;
+    public static final int DEFAULT_PUBLISH_BATCH_SIZE = 1;
 
     private AppConfig() {
         loadProperties();
@@ -69,6 +72,26 @@ public class AppConfig {
     
     public String getPodcastPublishDir() {
         return getProperty(KEY_PODCAST_PUBLISH_DIR);
+    }
+
+    public String getPodcastPublishedDir() {
+        return getProperty(KEY_PODCAST_PUBLISHED_DIR);
+    }
+    
+    public String getPodcastSummaryDir() {
+        return getPodcastDownloadDir() + "summary/";
+    }
+
+    public int getPodcastPublishBatchSize() {
+        String sizeStr = getProperty(KEY_PODCAST_PUBLISH_BATCH_SIZE);
+        if (sizeStr != null && !sizeStr.isEmpty()) {
+            try {
+                return Integer.parseInt(sizeStr);
+            } catch (NumberFormatException e) {
+                System.err.println("Invalid batch size format, using default: " + DEFAULT_PUBLISH_BATCH_SIZE);
+            }
+        }
+        return DEFAULT_PUBLISH_BATCH_SIZE;
     }
 
     public int getChromeDebugPort() {
