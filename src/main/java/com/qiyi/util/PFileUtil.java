@@ -17,8 +17,8 @@ public class PFileUtil {
             return;
         }
 
-        // 修改过滤器：处理所有 pdf/txt 文件，不再限制 CN_ 前缀
-        File[] files = dir.listFiles((d, name) -> (name.toLowerCase().endsWith(".pdf") || name.toLowerCase().endsWith(".txt")));
+        // 修改过滤器：只处理包含两个下划线的 pdf/txt 文件
+        File[] files = dir.listFiles((d, name) -> (name.toLowerCase().endsWith(".pdf") || name.toLowerCase().endsWith(".txt")) && name.chars().filter(ch -> ch == '_').count() == 2);
 
         if (files == null || files.length == 0) {
             log("目录中没有符合格式的文件");

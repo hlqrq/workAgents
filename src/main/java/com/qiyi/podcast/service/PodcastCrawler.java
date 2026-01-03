@@ -5,6 +5,7 @@ import com.microsoft.playwright.options.LoadState;
 import com.qiyi.podcast.PodCastItem;
 import com.qiyi.util.PodCastUtil;
 
+import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
@@ -233,61 +234,13 @@ public class PodcastCrawler {
             return false;
         }
     }
-
-    public void downloadEpisode(PodCastItem item, String savePath, boolean needTranslateCN) {
-        BrowserContext context = browser.contexts().isEmpty() ? browser.newContext() : browser.contexts().get(0);
-        Page page = context.newPage();
-        try {
-            String url = "https://podwise.ai" + item.linkString;
-            page.navigate(url);
-            page.waitForLoadState(LoadState.NETWORKIDLE);
-            page.waitForTimeout(1000);
-
-            ElementHandle exportDiv = page.querySelector("//button/span[contains(text(),'Export')]");
-            if (exportDiv != null) {
-                exportDiv.scrollIntoViewIfNeeded();
-                page.waitForTimeout(500);
-                exportDiv.click(new ElementHandle.ClickOptions().setForce(true));
-
-                ElementHandle pdfButton = page.waitForSelector("//button/span[contains(text(),'PDF')]", 
-                    new Page.WaitForSelectorOptions().setTimeout(SHORT_TIMEOUT_MS));
-
-                if (pdfButton != null) {
-                    pdfButton.click();
-                    ElementHandle downloadBtn = page.waitForSelector("//button[contains(text(),'Download')]", 
-                        new Page.WaitForSelectorOptions().setTimeout(SHORT_TIMEOUT_MS));
-
-                    if (downloadBtn != null) {
-                        Download download = page.waitForDownload(() -> downloadBtn.click());
-                        download.saveAs(Paths.get(savePath));
-                        System.out.println("下载成功: " + savePath);
-
-                        if (needTranslateCN) {
-                            downloadChineseVersion(page, item, savePath); // This needs logic update to use correct path
-                        }
-                    }
-                }
-            }
-        } catch (Exception e) {
-            System.err.println("下载失败 [" + item.title + "]: " + e.getMessage());
-        } finally {
-            page.close();
-        }
-    }
-    
-    // Helper for CN download - Simplified for this context
-    // Ideally this should return the CN path or byte array, but for now we follow existing pattern
-    // I need to pass the directory for CN files.
-    public String downloadChineseVersion(Page page, PodCastItem item, String originalPath) {
-         // Logic similar to original, but we need to know where to save.
-         // Since I separated FileService, I should probably pass the CN path here.
-         // For now, I'll rely on the caller or just assume a parallel folder structure if I don't pass it.
-         // Let's modify the signature to accept cnSavePath
-         return null; 
-    }
     
     public void downloadEpisode(PodCastItem item, String savePath, String cnSavePath) {
-         BrowserContext context = browser.contexts().isEmpty() ? browser.newContext() : browser.contexts().get(0);
+
+        Browser.NewContextOptions contextOptions = new Browser.NewContextOptions()
+            .setAcceptDownloads(true); // 使用临时目录
+
+        BrowserContext context = browser.contexts().isEmpty() ? browser.newContext(contextOptions) : browser.contexts().get(0);
         Page page = context.newPage();
         try {
             String url = "https://podwise.ai" + item.linkString;
@@ -310,8 +263,75 @@ public class PodcastCrawler {
                         new Page.WaitForSelectorOptions().setTimeout(SHORT_TIMEOUT_MS));
 
                     if (downloadBtn != null) {
+
+                        page.onDownload(download -> {
+                            System.out.println("下载开始: " + download.url());
+                            System.out.println("建议的文件名: " + download.suggestedFilename());
+                        });
+
+                        // Ensure directory exists
+                        java.nio.file.Path targetPath = Paths.get(savePath);
+                        Files.createDirectories(targetPath.getParent());
+
                         Download download = page.waitForDownload(() -> downloadBtn.click());
-                        download.saveAs(Paths.get(savePath));
+                        
+                        // Check for download failure
+                        if (download.failure() != null) {
+                            throw new RuntimeException("Download reported failure: " + download.failure());
+                        }
+
+                        // Validate temporary file path
+                        java.nio.file.Path tempPath = download.path();
+                        if (tempPath == null || !tempPath.toFile().exists()) {
+                            int maxTempRetries = 10;
+                            for(int i=0; i<maxTempRetries; i++) {
+                                if (tempPath != null && tempPath.toFile().exists()) break;
+                                try { Thread.sleep(500); } catch(Exception e){}
+                                tempPath = download.path();
+                            }
+                        }
+
+                        // Manual copy with saveAs() fallback
+                        if (tempPath != null && tempPath.toFile().exists()) {
+                            System.out.println("临时文件路径: " + tempPath);
+                            java.nio.file.Files.copy(tempPath, targetPath, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                            download.delete(); // Cleanup temporary file
+                        } else {
+                            // 尝试从默认下载目录查找
+                            String userHome = System.getProperty("user.home");
+                            java.nio.file.Path defaultDownloadPath = Paths.get(userHome, "Downloads", download.suggestedFilename());
+                            
+                            if (Files.exists(defaultDownloadPath)) {
+                                System.out.println("从默认下载目录找到文件: " + defaultDownloadPath);
+                                java.nio.file.Files.copy(defaultDownloadPath, targetPath, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                                // 可选：删除默认下载目录中的文件
+                                Files.delete(defaultDownloadPath); 
+                            } else {
+                                System.out.println("默认下载目录未找到文件，尝试 saveAs");
+                                download.saveAs(targetPath);
+                            }
+                        }
+                        
+                        // Wait for file system to flush and file to be available
+                        java.io.File file = targetPath.toFile();
+                        int maxRetries = 20;
+                        int retryCount = 0;
+                        while ((!file.exists() || file.length() == 0) && retryCount < maxRetries) {
+                            try {
+                                Thread.sleep(500); 
+                            } catch (InterruptedException e) {
+                                Thread.currentThread().interrupt();
+                            }
+                            retryCount++;
+                        }
+                        
+                        if (!file.exists()) {
+                             // Double check if it exists now
+                             if (!java.nio.file.Files.exists(targetPath)) {
+                                 throw new RuntimeException("File save failed, file not found after wait: " + savePath);
+                             }
+                        }
+
                         System.out.println("English download: " + savePath);
 
                         if (cnSavePath != null) {
@@ -353,8 +373,80 @@ public class PodcastCrawler {
                         new Page.WaitForSelectorOptions().setTimeout(SHORT_TIMEOUT_MS));
                     
                     if (newDownloadBtn != null) {
+                        java.nio.file.Path targetPath = Paths.get(savePath);
+                        if (targetPath.getParent() != null) {
+                            java.nio.file.Files.createDirectories(targetPath.getParent());
+                        }
+
                         Download download = page.waitForDownload(() -> newDownloadBtn.click());
-                        download.saveAs(Paths.get(savePath));
+                        
+                        if (download.failure() != null) {
+                             throw new RuntimeException("CN Download reported failure: " + download.failure());
+                        }
+
+                        // Explicit wait
+                        try {
+                             Thread.sleep(1000); 
+                        } catch (InterruptedException e) {
+                             Thread.currentThread().interrupt();
+                        }
+
+                         // Try to get the path first
+                        java.nio.file.Path tempPath = download.path();
+                        if (tempPath == null || !tempPath.toFile().exists()) {
+                             int maxTempRetries = 20;
+                             for(int i=0; i<maxTempRetries; i++) {
+                                 if (tempPath != null && tempPath.toFile().exists()) break;
+                                 try { Thread.sleep(500); } catch(Exception e){}
+                                 tempPath = download.path();
+                             }
+                        }
+
+                        if (tempPath != null && tempPath.toFile().exists()) {
+                             java.nio.file.Files.copy(tempPath, targetPath, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                             download.delete();
+                        } else {
+                             // 尝试从默认下载目录查找
+                             String userHome = System.getProperty("user.home");
+                             java.nio.file.Path defaultDownloadPath = Paths.get(userHome, "Downloads", download.suggestedFilename());
+                             
+                             // 增加等待重试
+                             int waitDefaultFile = 0;
+                             while (!Files.exists(defaultDownloadPath) && waitDefaultFile < 20) {
+                                 try { Thread.sleep(500); } catch(Exception e){}
+                                 waitDefaultFile++;
+                             }
+
+                             if (Files.exists(defaultDownloadPath)) {
+                                 System.out.println("从默认下载目录找到文件(CN): " + defaultDownloadPath);
+                                 java.nio.file.Files.copy(defaultDownloadPath, targetPath, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                                 // 可选：删除默认下载目录中的文件
+                                 Files.delete(defaultDownloadPath); 
+                             } else {
+                                 download.saveAs(targetPath);
+                             }
+                        }
+                        
+                        // Wait for file system to flush and file to be available
+                        java.io.File file = targetPath.toFile();
+                        int maxRetries = 10;
+                        int retryCount = 0;
+                        while ((!file.exists() || file.length() == 0) && retryCount < maxRetries) {
+                            try {
+                                Thread.sleep(500); 
+                            } catch (InterruptedException e) {
+                                Thread.currentThread().interrupt();
+                            }
+                            retryCount++;
+                        }
+                        
+                        if (!file.exists()) {
+                             // Double check
+                             if (!java.nio.file.Files.exists(targetPath)) {
+                                 throw new RuntimeException("CN File save failed, file not found after wait: " + savePath);
+                             }
+                        }
+
                         System.out.println("Chinese download: " + savePath);
                     }
                 }
