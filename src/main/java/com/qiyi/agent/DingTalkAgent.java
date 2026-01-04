@@ -32,7 +32,7 @@ public class DingTalkAgent {
             System.out.println("用户: " + user.getName() + ", ID: " + user.getUserid());
 
             //0.发送文本给单用户
-            DingTalkUtil.sendTextMessageToEmployees(Arrays.asList(user.getUserid()),"发送单聊测试消息！");
+            DingTalkUtil.sendTextMessageToEmployees(Arrays.asList(user.getUserid()),"机器人服务已启动！");
 
             // // 1. 发送文本消息
             // DingTalkUtil.sendTextMessageToGroup("测试文本消息：钉钉，让进步发生", Arrays.asList(user.getUserid()), false);
