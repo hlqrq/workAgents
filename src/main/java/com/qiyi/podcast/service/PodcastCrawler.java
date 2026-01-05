@@ -104,6 +104,7 @@ public class PodcastCrawler {
         do {
             List<ElementHandle> elements = page.querySelectorAll(XPATH_PODCAST_ITEM);
             System.out.println("当前元素总数: " + elements.size() + ", 已处理索引: " + lastProcessedIndex);
+            showPageNotification(page, "正在分析播客列表... 当前已加载 " + elements.size() + " 个项目");
 
             // 防止页面刷新或DOM重构导致索引越界或漏处理
             if (elements.size() < lastProcessedIndex) {
@@ -129,6 +130,7 @@ public class PodcastCrawler {
                                 existingNames.add(item.title);
                                 hasNewValidItemInThisBatch = true;
                                 System.out.println("找到有效Item: " + item.channelName + " - " + item.title);
+                                showPageNotification(page, "发现新可下载播客: " + item.title);
                             } else {
                                 // 调试日志：记录未就绪的项目
                                  System.out.println("Item 未就绪 (Skipped): " + item.title);
@@ -178,6 +180,8 @@ public class PodcastCrawler {
             }
 
         } while (tryTimes <= maxTryTimes && validItemCount < maxProcessCount);
+        
+        showPageNotification(page, "扫描任务完成，共找到 " + validItemCount + " 个新播客");
     }
 
     private PodCastItem parsePodcastItem(ElementHandle element) {
@@ -214,9 +218,41 @@ public class PodcastCrawler {
         }
     }
 
+    private void showPageNotification(Page page, String message) {
+        try {
+            String js = "msg => {" +
+                "  let el = document.getElementById('crawler-notification');" +
+                "  if (!el) {" +
+                "    el = document.createElement('div');" +
+                "    el.id = 'crawler-notification';" +
+                "    el.style.position = 'fixed';" +
+                "    el.style.top = '80px';" + // Avoid covering header if any
+                "    el.style.right = '20px';" +
+                "    el.style.backgroundColor = 'rgba(33, 150, 243, 0.9)';" + // Blue with transparency
+                "    el.style.color = 'white';" +
+                "    el.style.padding = '12px 20px';" +
+                "    el.style.borderRadius = '8px';" +
+                "    el.style.zIndex = '999999';" +
+                "    el.style.fontSize = '14px';" +
+                "    el.style.fontWeight = 'bold';" +
+                "    el.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)';" +
+                "    el.style.fontFamily = '-apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif';" +
+                "    el.style.transition = 'all 0.3s ease';" +
+                "    document.body.appendChild(el);" +
+                "  }" +
+                "  el.innerText = msg;" +
+                "  el.style.display = 'block';" +
+                "}";
+            page.evaluate(js, message);
+        } catch (Exception e) {
+            // Ignore UI update errors
+        }
+    }
+
     private boolean tryClickLoadMore(Page page) {
         ElementHandle loadMore = page.querySelector(SELECTOR_LOAD_MORE);
         if (loadMore != null) {
+            showPageNotification(page, "正在加载更多内容 (点击 Load More)...");
             loadMore.click();
             return true;
         }
@@ -225,6 +261,7 @@ public class PodcastCrawler {
 
     private boolean scrollToLoadMore(Page page) {
         try {
+            showPageNotification(page, "正在向下滚动加载更多内容...");
             page.keyboard().press("End");
             System.out.println("已滚动到底部，等待加载...");
             PodCastUtil.waitForHeightStabilized(page, 10);
@@ -332,18 +369,29 @@ public class PodcastCrawler {
                              }
                         }
 
+                        // Close page now as we have the file
+                        if (!page.isClosed() && cnSavePath == null) {
+                            page.close();
+                        }
+
                         System.out.println("English download: " + savePath);
 
                         if (cnSavePath != null) {
                              downloadChineseVersionInternal(page, cnSavePath);
+                             if (!page.isClosed()) {
+                                 page.close();
+                             }
                         }
                     }
                 }
             }
+            
         } catch (Exception e) {
             System.err.println("Download failed [" + item.title + "]: " + e.getMessage());
         } finally {
-            page.close();
+            if (!page.isClosed()) {
+                page.close();
+            }
         }
     }
 

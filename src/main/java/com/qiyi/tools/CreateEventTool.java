@@ -1,0 +1,211 @@
+package com.qiyi.tools;
+
+import com.alibaba.fastjson2.JSONObject;
+import com.qiyi.util.DingTalkUtil;
+import com.qiyi.dingtalk.DingTalkDepartment;
+import com.qiyi.dingtalk.DingTalkUser;
+import java.util.List;
+import java.util.ArrayList;
+import java.util.Map;
+import java.util.HashMap;
+import java.util.Collection;
+import java.time.LocalDateTime;
+import java.time.ZonedDateTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+
+public class CreateEventTool implements Tool {
+    @Override
+    public String getName() {
+        return "create_event";
+    }
+
+    @Override
+    public String getDescription() {
+        return "Create a calendar event. Parameters: summary (string, mandatory), startTime (string, mandatory, yyyy-MM-dd HH:mm:ss), endTime (string, mandatory, yyyy-MM-dd HH:mm:ss), attendees (string/List, mandatory, names/userIds), description (string, optional), location (string, optional).";
+    }
+
+    @Override
+    public void execute(JSONObject params, String senderId, List<String> atUserIds) {
+        String summary = params.getString("summary");
+        String startTimeStr = params.getString("startTime");
+        String endTimeStr = params.getString("endTime");
+        String description = params.getString("description");
+        String location = params.getString("location");
+        Object attendeesObj = params.get("attendees");
+
+        List<String> notifyUsers = new ArrayList<>();
+        if (senderId != null) notifyUsers.add(senderId);
+
+        // 1. Resolve Attendees
+        List<String> attendeeUserIds = new ArrayList<>();
+        List<String> notFoundNames = new ArrayList<>();
+
+        if (attendeesObj != null) {
+            List<String> inputNames = new ArrayList<>();
+            if (attendeesObj instanceof com.alibaba.fastjson2.JSONArray) {
+                for (Object o : (com.alibaba.fastjson2.JSONArray) attendeesObj) {
+                    if (o != null) inputNames.add(String.valueOf(o));
+                }
+            } else if (attendeesObj instanceof Collection) {
+                for (Object o : (Collection<?>) attendeesObj) {
+                    if (o != null) inputNames.add(String.valueOf(o));
+                }
+            } else if (attendeesObj instanceof String) {
+                String s = (String) attendeesObj;
+                if (!s.trim().isEmpty()) {
+                    String[] parts = s.split("[,，\\s]+");
+                    for (String p : parts) {
+                        if (!p.trim().isEmpty()) inputNames.add(p.trim());
+                    }
+                }
+            }
+
+            if (!inputNames.isEmpty()) {
+                 try {
+                    // Try to resolve names to IDs
+                    List<DingTalkDepartment> departments = DingTalkUtil.getAllDepartments(true, true);
+                    Map<String, String> userMap = new HashMap<>();
+                    Map<String, List<String>> deptMap = new HashMap<>();
+                    
+                    for (DingTalkDepartment dept : departments) {
+                        if (dept.getName() != null) {
+                            List<String> userIdsInDept = new ArrayList<>();
+                            if (dept.getUserList() != null) {
+                                for (DingTalkUser user : dept.getUserList()) {
+                                    userMap.put(user.getName(), user.getUserid());
+                                    userIdsInDept.add(user.getUserid());
+                                }
+                            }
+                            // Store department name -> list of user IDs
+                            deptMap.put(dept.getName(), userIdsInDept);
+                        }
+                    }
+                    
+                    for (String name : inputNames) {
+                        if (userMap.containsKey(name)) {
+                            String uid = userMap.get(name);
+                            if (!attendeeUserIds.contains(uid)) {
+                                attendeeUserIds.add(uid);
+                            }
+                        } else if (deptMap.containsKey(name)) {
+                            // If name matches a department, add all users in that department
+                            List<String> deptUsers = deptMap.get(name);
+                            if (deptUsers != null) {
+                                for (String uid : deptUsers) {
+                                    if (!attendeeUserIds.contains(uid)) {
+                                        attendeeUserIds.add(uid);
+                                    }
+                                }
+                            }
+                        } else if (userMap.containsValue(name)) { // Check if input is already an ID
+                             if (!attendeeUserIds.contains(name)) {
+                                attendeeUserIds.add(name);
+                             }
+                        } else {
+                            notFoundNames.add(name);
+                        }
+                    }
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            }
+        }
+        
+        // Add atUserIds if any
+        if (atUserIds != null) {
+             for(String uid : atUserIds) {
+                 if(!attendeeUserIds.contains(uid)) attendeeUserIds.add(uid);
+             }
+        }
+
+        if (!notFoundNames.isEmpty()) {
+             try {
+                DingTalkUtil.sendTextMessageToEmployees(notifyUsers, "创建日程警告: 未找到以下参与人: " + String.join("，", notFoundNames) + "。");
+             } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }
+
+        if (attendeeUserIds.isEmpty()) {
+            try {
+                DingTalkUtil.sendTextMessageToEmployees(notifyUsers, "创建日程失败: 未指定有效的参与人。");
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+            return;
+        }
+
+        // 2. Validate Time
+        if (startTimeStr == null || endTimeStr == null) {
+             try {
+                DingTalkUtil.sendTextMessageToEmployees(notifyUsers, "创建日程失败: 开始时间或结束时间缺失。");
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+            return;
+        }
+
+        // 3. Convert Time to ISO 8601 (yyyy-MM-dd'T'HH:mm:ss+08:00)
+        String isoStartTime;
+        String isoEndTime;
+        try {
+            DateTimeFormatter inputFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+            LocalDateTime localStart = LocalDateTime.parse(startTimeStr, inputFormatter);
+            LocalDateTime localEnd = LocalDateTime.parse(endTimeStr, inputFormatter);
+            
+            ZonedDateTime zonedStart = localStart.atZone(ZoneId.of("Asia/Shanghai"));
+            ZonedDateTime zonedEnd = localEnd.atZone(ZoneId.of("Asia/Shanghai"));
+            
+            isoStartTime = zonedStart.format(DateTimeFormatter.ISO_OFFSET_DATE_TIME);
+            isoEndTime = zonedEnd.format(DateTimeFormatter.ISO_OFFSET_DATE_TIME);
+        } catch (Exception e) {
+             // Fallback or rethrow
+             throw new RuntimeException("时间格式解析错误，请确保使用 yyyy-MM-dd HH:mm:ss 格式。Input: " + startTimeStr + " / " + endTimeStr);
+        }
+
+        // 4. Create Event
+        try {
+            // Using senderId as the user to create event for
+            String unionId = DingTalkUtil.getUnionIdByUserId(senderId);
+            if (unionId == null) {
+                 throw new RuntimeException("无法获取操作人的 UnionId，无法创建日程。UserId: " + senderId);
+            }
+            
+            // Convert attendeeUserIds to UnionIds
+            List<String> attendeeUnionIds = new ArrayList<>();
+            List<String> failedConversionUsers = new ArrayList<>();
+            for (String uid : attendeeUserIds) {
+                try {
+                    String uUnionId = DingTalkUtil.getUnionIdByUserId(uid);
+                    if (uUnionId != null) {
+                        attendeeUnionIds.add(uUnionId);
+                    } else {
+                        failedConversionUsers.add(uid);
+                    }
+                } catch (Exception e) {
+                    failedConversionUsers.add(uid);
+                    e.printStackTrace();
+                }
+            }
+            
+            if (!failedConversionUsers.isEmpty()) {
+                 DingTalkUtil.sendTextMessageToEmployees(notifyUsers, "警告: 无法获取以下用户的 UnionId，将被忽略: " + String.join(", ", failedConversionUsers));
+            }
+
+            if (attendeeUnionIds.isEmpty() && !attendeeUserIds.isEmpty()) {
+                 throw new RuntimeException("没有有效的参与人 (UnionId 获取失败)");
+            }
+            
+            String eventId = DingTalkUtil.createCalendarEvent(unionId, summary, description, isoStartTime, isoEndTime, attendeeUnionIds, location);
+            DingTalkUtil.sendTextMessageToEmployees(notifyUsers, "日程创建成功！标题: " + summary + "，时间: " + startTimeStr + " - " + endTimeStr + "，参与人数: " + attendeeUnionIds.size());
+        } catch (Exception e) {
+            e.printStackTrace();
+            try {
+                DingTalkUtil.sendTextMessageToEmployees(notifyUsers, "创建日程失败: " + e.getMessage());
+            } catch (Exception ex) {
+                ex.printStackTrace();
+            }
+        }
+    }
+}

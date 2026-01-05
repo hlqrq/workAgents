@@ -12,6 +12,33 @@ public class DingTalkAgent {
 
     public static void main(String[] args) throws Exception {
 
+        java.io.File lockFile = new java.io.File(System.getProperty("java.io.tmpdir"), "DingTalkAgent.lock");
+        java.io.RandomAccessFile raf = new java.io.RandomAccessFile(lockFile, "rw");
+        java.nio.channels.FileChannel channel = raf.getChannel();
+        java.nio.channels.FileLock acquiredLock = null;
+        try {
+            acquiredLock = channel.tryLock();
+        } catch (java.nio.channels.OverlappingFileLockException e) {
+            acquiredLock = null;
+        }
+        if (acquiredLock == null) {
+            System.err.println("DingTalkAgent 已在运行，禁止重复启动");
+            raf.close();
+            return;
+        }
+        final java.nio.channels.FileLock lockRef = acquiredLock;
+        final java.nio.channels.FileChannel channelRef = channel;
+        final java.io.RandomAccessFile rafRef = raf;
+        final java.io.File lockFileRef = lockFile;
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            try {
+                lockRef.release();
+                channelRef.close();
+                rafRef.close();
+                lockFileRef.delete();
+            } catch (Exception ignored) {}
+        }));
+
         //启动机器人监听
         DingTalkUtil.startRobotMsgCallbackConsumer();
 

@@ -1,0 +1,66 @@
+package com.qiyi.tools;
+
+import com.alibaba.fastjson2.JSONObject;
+import com.qiyi.util.DingTalkUtil;
+import java.util.List;
+import java.util.ArrayList;
+import java.util.concurrent.locks.ReentrantLock;
+
+public class DownloadPodcastTool implements Tool {
+    private static final ReentrantLock DOWNLOAD_LOCK = new ReentrantLock();
+    private static final com.qiyi.agent.PodwiseAgent podwiseAgent = new com.qiyi.agent.PodwiseAgent();
+
+    @Override
+    public String getName() {
+        return "download_podcast";
+    }
+
+    @Override
+    public String getDescription() {
+        return String.format("Download podcasts from Podwise. Parameters: maxProcessCount (int, default %d), maxTryTimes (int, default %d), maxDuplicatePages (int, default %d), downloadMaxProcessCount (int, default %d), threadPoolSize (int, default %d).",
+                DingTalkUtil.Defaults.DOWNLOAD_MAX_PROCESS_COUNT,
+                DingTalkUtil.Defaults.DOWNLOAD_MAX_TRY_TIMES,
+                DingTalkUtil.Defaults.DOWNLOAD_MAX_DUPLICATE_PAGES,
+                DingTalkUtil.Defaults.DOWNLOAD_DOWNLOAD_MAX_PROCESS_COUNT,
+                DingTalkUtil.Defaults.DOWNLOAD_THREAD_POOL_SIZE);
+    }
+
+    @Override
+    public void execute(JSONObject params, String senderId, List<String> atUserIds) {
+        int maxProcessCount = params != null && params.containsKey("maxProcessCount") ? params.getIntValue("maxProcessCount") : DingTalkUtil.Defaults.DOWNLOAD_MAX_PROCESS_COUNT;
+        int maxTryTimes = params != null && params.containsKey("maxTryTimes") ? params.getIntValue("maxTryTimes") : DingTalkUtil.Defaults.DOWNLOAD_MAX_TRY_TIMES;
+        int maxDuplicatePages = params != null && params.containsKey("maxDuplicatePages") ? params.getIntValue("maxDuplicatePages") : DingTalkUtil.Defaults.DOWNLOAD_MAX_DUPLICATE_PAGES;
+        int downloadMaxProcessCount = params != null && params.containsKey("downloadMaxProcessCount") ? params.getIntValue("downloadMaxProcessCount") : DingTalkUtil.Defaults.DOWNLOAD_DOWNLOAD_MAX_PROCESS_COUNT;
+        int threadPoolSize = params != null && params.containsKey("threadPoolSize") ? params.getIntValue("threadPoolSize") : DingTalkUtil.Defaults.DOWNLOAD_THREAD_POOL_SIZE;
+
+        List<String> notifyUsers = new ArrayList<>();
+        if (senderId != null) notifyUsers.add(senderId);
+        if (atUserIds != null && !atUserIds.isEmpty()) {
+            notifyUsers.addAll(atUserIds);
+        }
+
+        if (!DOWNLOAD_LOCK.tryLock()) {
+            try {
+                DingTalkUtil.sendTextMessageToEmployees(notifyUsers, "当前已有下载任务正在执行，请稍后再试。");
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+            return;
+        }
+
+        try {
+            DingTalkUtil.sendTextMessageToEmployees(notifyUsers, "开始执行下载任务...");
+            int count = podwiseAgent.run(maxProcessCount, maxTryTimes, maxDuplicatePages, downloadMaxProcessCount, threadPoolSize);
+            DingTalkUtil.sendTextMessageToEmployees(notifyUsers, "下载任务执行完毕，共下载更新了 " + count + " 条播客。");
+        } catch (Exception e) {
+            e.printStackTrace();
+            try {
+                DingTalkUtil.sendTextMessageToEmployees(notifyUsers, "下载任务执行异常: " + e.getMessage());
+            } catch (Exception ex) {
+                ex.printStackTrace();
+            }
+        } finally {
+            DOWNLOAD_LOCK.unlock();
+        }
+    }
+}

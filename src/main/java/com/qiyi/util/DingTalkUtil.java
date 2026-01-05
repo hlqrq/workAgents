@@ -7,11 +7,9 @@ import com.dingtalk.api.DingTalkClient;
 import com.dingtalk.api.request.OapiRobotSendRequest;
 import com.dingtalk.api.request.OapiUserListsimpleRequest;
 import com.dingtalk.api.request.OapiV2DepartmentListsubRequest;
-import com.dingtalk.api.request.OapiV2UserGetRequest;
 import com.dingtalk.api.response.OapiRobotSendResponse;
 import com.dingtalk.api.response.OapiUserListsimpleResponse;
 import com.dingtalk.api.response.OapiV2DepartmentListsubResponse;
-import com.dingtalk.api.response.OapiV2UserGetResponse;
 import com.dingtalk.open.app.api.OpenDingTalkClient;
 import com.dingtalk.open.app.api.OpenDingTalkStreamClientBuilder;
 import com.dingtalk.open.app.api.callback.OpenDingTalkCallbackListener;
@@ -20,7 +18,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.qiyi.dingtalk.DingTalkDepartment;
 import com.qiyi.dingtalk.DingTalkUser;
-import com.qiyi.podcast.tools.PodCastPostToWechat;
 import com.taobao.api.FileItem;
 import com.aliyun.dingtalkoauth2_1_0.models.GetAccessTokenResponse;
 import com.aliyun.dingtalkrobot_1_0.models.*;
@@ -42,8 +39,13 @@ import java.util.stream.Collectors;
 
 import com.aliyun.teaopenapi.models.Config;
 import com.aliyun.teautil.models.RuntimeOptions;
-import com.qiyi.config.AppConfig;
-import java.nio.file.StandardCopyOption;
+import com.qiyi.tools.Tool;
+import com.qiyi.tools.ToolRegistry;
+import com.qiyi.tools.DownloadPodcastTool;
+import com.qiyi.tools.PublishWechatTool;
+import com.qiyi.tools.SendMessageTool;
+import com.qiyi.tools.CreateEventTool;
+import com.qiyi.tools.ShutdownAgentTool;
 
 //机器人方面的配置，可以参考这里：最好是企业机器人 https://open-dev.dingtalk.com/fe/app?hash=%23%2Fcorp%2Fapp#/corp/app
 //接口方面的说明可以参考这里：https://open.dingtalk.com/document/development/development-basic-concepts
@@ -58,11 +60,9 @@ public class DingTalkUtil {
     public static String ROBOT_CLIENT_SECRET = "";
 
     private static String ROBOT_CODE = "";
-    private static Long AGENT_ID = 0L; // AgentId 用于发送工作通知（如本地图片）
-    private static String PODCAST_PUBLISH_DIR = "";
+    public static Long AGENT_ID = 0L; // AgentId 用于发送工作通知（如本地图片）
     public static List<String> PODCAST_ADMIN_USERS = new ArrayList<>();
 
-    private static final java.util.Map<String, ToolHandler> tools = new java.util.HashMap<>();
     private static final java.util.Map<String, String> PARAM_NAME_MAPPING = new java.util.HashMap<>();
 
     static {
@@ -83,94 +83,92 @@ public class DingTalkUtil {
         PARAM_NAME_MAPPING.put("description", "日程描述");
         PARAM_NAME_MAPPING.put("location", "地点");
         PARAM_NAME_MAPPING.put("attendees", "参与人");
-
-        initClientConfig();PARAM_NAME_MAPPING.put("departments", "部门列表");
+        PARAM_NAME_MAPPING.put("departments", "部门列表");
 
         initClientConfig();
         registerTools();
     }
 
-    interface ToolHandler {
-        String getName();
-        String getDescription();
-        void execute(JSONObject params, String senderId, List<String> atUserIds);
-    }
-
     private static void registerTools() {
-        tools.put("download_podcast", new ToolHandler() {
-            @Override
-            public String getName() { return "download_podcast"; }
-            @Override
-            public String getDescription() {
-                return "Download podcasts from Podwise. Parameters: maxProcessCount (int, default 50), maxTryTimes (int, default 15), maxDuplicatePages (int, default 10), downloadMaxProcessCount (int, default 0), threadPoolSize (int, default 15).";
-            }
-            @Override
-            public void execute(JSONObject params, String senderId, List<String> atUserIds) {
-                DingTalkUtil.handleDownloadPodCastTask(senderId, atUserIds, params);
-            }
-        });
-
-        tools.put("publish_wechat", new ToolHandler() {
-            @Override
-            public String getName() { return "publish_wechat"; }
-            @Override
-            public String getDescription() {
-                return "Publish podcasts to WeChat Official Account. Parameters: isDraft (boolean, default false), atUserIds (List<String>).";
-            }
-            @Override
-            public void execute(JSONObject params, String senderId, List<String> atUserIds) {
-                DingTalkUtil.handlePublishTask(senderId, atUserIds, params);
-            }
-        });
-
-        tools.put("send_message", new ToolHandler() {
-            @Override
-            public String getName() { return "send_message"; }
-            @Override
-            public String getDescription() {
-                return "Send direct DingTalk text message to specific users. Parameters: content (string, mandatory). Choose ONE of: departments (string/List, names or IDs) OR names (string/List). If both provided, departments take precedence.";
-            }
-            @Override
-            public void execute(JSONObject params, String senderId, List<String> atUserIds) {
-                DingTalkUtil.handleSendMessageTask(senderId, atUserIds, params);
-            }
-        });
-
-        tools.put("create_event", new ToolHandler() {
-            @Override
-            public String getName() { return "create_event"; }
-            @Override
-            public String getDescription() {
-                return "Create a calendar event. Parameters: summary (string, mandatory), startTime (string, mandatory, yyyy-MM-dd HH:mm:ss), endTime (string, mandatory, yyyy-MM-dd HH:mm:ss), attendees (string/List, mandatory, names/userIds), description (string, optional), location (string, optional).";
-            }
-            @Override
-            public void execute(JSONObject params, String senderId, List<String> atUserIds) {
-                DingTalkUtil.handleCreateEventTask(senderId, atUserIds, params);
-            }
-        });
+        ToolRegistry.register(new DownloadPodcastTool());
+        ToolRegistry.register(new PublishWechatTool());
+        ToolRegistry.register(new SendMessageTool());
+        ToolRegistry.register(new CreateEventTool());
+        ToolRegistry.register(new ShutdownAgentTool());
     }
 
     private static void analyzeAndExecute(String text, String senderId, List<String> atUserIds) {
+        // Step 1: Tool Selection
+        StringBuilder selectionPrompt = new StringBuilder();
+        selectionPrompt.append("You are an intent classifier. Analyze the user's input and select the tools that might be needed.\n");
+        selectionPrompt.append("The available tools are:\n");
+        for (Tool tool : ToolRegistry.getAll()) {
+            selectionPrompt.append("- Tool: ").append(tool.getName()).append("\n");
+            String desc = tool.getDescription();
+            int idx = desc.indexOf("Parameters:");
+            if (idx > 0) {
+                 desc = desc.substring(0, idx).trim();
+            }
+            selectionPrompt.append("  Description: ").append(desc).append("\n");
+        }
+        selectionPrompt.append("\nUser Input: \"").append(text).append("\"\n");
+        selectionPrompt.append("\nReturn JSON only. Format: { \"selected_tools\": [\"tool_name1\"] } or { \"selected_tools\": [] } if no tool matches.");
+
+        List<String> validSelectedTools = new ArrayList<>();
+        try {
+            String selectionResponse = PodCastUtil.chatWithDeepSeek(selectionPrompt.toString());
+            if (selectionResponse != null && !selectionResponse.trim().isEmpty()) {
+                selectionResponse = selectionResponse.replace("```json", "").replace("```", "").trim();
+                JSONObject selectionJson = JSON.parseObject(selectionResponse);
+                if (selectionJson.containsKey("selected_tools")) {
+                    List<String> selectedTools = selectionJson.getJSONArray("selected_tools").toJavaList(String.class);
+                    for (String t : selectedTools) {
+                        if (ToolRegistry.contains(t)) {
+                            validSelectedTools.add(t);
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            System.err.println("Tool selection failed: " + e.getMessage());
+        }
+
+        // Step 2: Execution Plan
         StringBuilder sb = new StringBuilder();
         sb.append("You are an intent classifier. Analyze the user's input and map it to a sequence of tools to be executed.\n");
-        sb.append("The tools available are:\n");
-        for (ToolHandler tool : tools.values()) {
-            sb.append("- Tool: ").append(tool.getName()).append("\n");
-            sb.append("  Description: ").append(tool.getDescription()).append("\n");
+        sb.append("Current Date and Time: ").append(java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))).append("\n");
+        sb.append("Note: If the user provides relative time (e.g., 'tomorrow', 'next week'), calculate the exact date based on the Current Date. For 'create_event', startTime and endTime MUST be in 'yyyy-MM-dd HH:mm:ss' format.\n");
+        
+        if (!validSelectedTools.isEmpty()) {
+            sb.append("The tools available (selected from previous step) are:\n");
+            for (String toolName : validSelectedTools) {
+                Tool tool = ToolRegistry.get(toolName);
+                sb.append("- Tool: ").append(tool.getName()).append("\n");
+                sb.append("  Description: ").append(tool.getDescription()).append("\n");
+            }
+        } else {
+            sb.append("No specific tools were matched, but please provide a helpful reply.\n");
         }
+        
         sb.append("\nUser Input: \"").append(text).append("\"\n");
         sb.append("\nReturn JSON only (no markdown, no ```json wrapper). The JSON must follow this structure:\n");
         sb.append("{\n");
-        sb.append("  \"reply\": \"A polite reply in Chinese summarizing the plan. Do NOT ask for user confirmation or if they want to proceed. State that you are starting the tasks immediately.\",\n");
+        if (!validSelectedTools.isEmpty()) {
+            sb.append("  \"reply\": \"A polite reply in Chinese summarizing the plan. Do NOT ask for user confirmation or if they want to proceed. State that you are starting the tasks immediately.\",\n");
+        } else {
+            sb.append("  \"reply\": \"A polite reply in Chinese. If the user input is a greeting or chat, respond naturally. If the user is asking for a task that cannot be performed by the available tools (since none were selected), politely explain that you do not have that capability.\",\n");
+        }
         sb.append("  \"tasks\": [\n");
-        sb.append("    {\n");
-        sb.append("      \"tool\": \"tool_name\" (or null if no match found),\n");
-        sb.append("      \"confidence\": \"high\" | \"medium\" | \"low\",\n");
-        sb.append("      \"parameters\": {\n");
-        sb.append("        \"paramName\": value\n");
-        sb.append("      },\n");
-        sb.append("      \"missing_info\": \"Description of missing MANDATORY information ONLY. If a parameter is optional or has a default value, do NOT list it here. Return empty string if all mandatory info is present.\"\n");
-        sb.append("    }\n");
+        if (!validSelectedTools.isEmpty()) {
+            sb.append("    {\n");
+            sb.append("      \"tool\": \"tool_name\" (or null if no match found),\n");
+            sb.append("      \"confidence\": \"high\" | \"medium\" | \"low\",\n");
+            sb.append("      \"parameters\": {\n");
+            sb.append("        \"paramName\": value\n");
+            sb.append("      },\n");
+            sb.append("      \"missing_info\": \"Description of missing MANDATORY information ONLY. If a parameter is optional or has a default value, do NOT list it here. Return empty string if all mandatory info is present.\"\n");
+            sb.append("    }\n");
+        }
         sb.append("  ]\n");
         sb.append("}");
 
@@ -209,8 +207,8 @@ public class DingTalkUtil {
                 String missingInfo = task.getString("missing_info");
                 if ("null".equalsIgnoreCase(missingInfo)) missingInfo = null;
 
-                if (toolName != null && tools.containsKey(toolName) && ("high".equalsIgnoreCase(confidence) || "medium".equalsIgnoreCase(confidence))) {
-                    java.util.Map<String, String> defaults = extractDefaultParamsFromDescription(tools.get(toolName).getDescription());
+                if (toolName != null && ToolRegistry.contains(toolName) && ("high".equalsIgnoreCase(confidence) || "medium".equalsIgnoreCase(confidence))) {
+                    java.util.Map<String, String> defaults = extractDefaultParamsFromDescription(ToolRegistry.get(toolName).getDescription());
                     List<String> defaultEntries = new ArrayList<>();
                     if (defaults != null && !defaults.isEmpty()) {
                         for (java.util.Map.Entry<String, String> e : defaults.entrySet()) {
@@ -247,7 +245,7 @@ public class DingTalkUtil {
             for (JSONObject task : validTasks) {
                 String toolName = task.getString("tool");
                 JSONObject params = task.getJSONObject("parameters");
-                tools.get(toolName).execute(params, senderId, atUserIds);
+                ToolRegistry.get(toolName).execute(params, senderId, atUserIds);
             }
 
         } catch (Exception e) {
@@ -261,6 +259,7 @@ public class DingTalkUtil {
              }
         }
     }
+    
     private static java.util.Map<String, String> extractDefaultParamsFromDescription(String description) {
         java.util.Map<String, String> map = new java.util.HashMap<>();
         if (description == null) return map;
@@ -319,10 +318,6 @@ public class DingTalkUtil {
             }
         }
         
-        if (props.containsKey("podcast.publish.dir")) {
-            PODCAST_PUBLISH_DIR = props.getProperty("podcast.publish.dir");
-        }
-        
         if (props.containsKey("podcast.admin.users")) {
             String users = props.getProperty("podcast.admin.users");
             if (users != null && !users.isEmpty()) {
@@ -331,111 +326,18 @@ public class DingTalkUtil {
         }
     }
 
-
-    // 任务锁，确保同一时间只有一个发布任务执行，避免争抢浏览器资源
-    private static final java.util.concurrent.locks.ReentrantLock PUBLISH_LOCK = new java.util.concurrent.locks.ReentrantLock();
-    // 任务锁，确保同一时间只有一个下载任务执行
-    private static final java.util.concurrent.locks.ReentrantLock DOWNLOAD_LOCK = new java.util.concurrent.locks.ReentrantLock();
-    private static final com.qiyi.agent.PodwiseAgent podwiseAgent = new com.qiyi.agent.PodwiseAgent();
+    public static class Defaults {
+        public static final int DOWNLOAD_MAX_PROCESS_COUNT = 50;
+        public static final int DOWNLOAD_MAX_TRY_TIMES = 15;
+        public static final int DOWNLOAD_MAX_DUPLICATE_PAGES = 5;
+        public static final int DOWNLOAD_DOWNLOAD_MAX_PROCESS_COUNT = 0;
+        public static final int DOWNLOAD_THREAD_POOL_SIZE = 15;
+        public static final boolean PUBLISH_IS_DRAFT = false;
+    }
 
     private static volatile OpenDingTalkClient streamClient;
     
-    /**
-     * 从 summary 目录读取未发布的文件到 publish 目录
-     */
-    private static void stageFilesForPublishing(List<String> notifyUsers) {
-        String summaryDirStr = AppConfig.getInstance().getPodcastSummaryDir();
-        String publishDirStr = AppConfig.getInstance().getPodcastPublishDir();
-        String publishedDirStr = AppConfig.getInstance().getPodcastPublishedDir();
-        int batchSize = AppConfig.getInstance().getPodcastPublishBatchSize();
 
-        if (summaryDirStr == null || publishDirStr == null || publishedDirStr == null) {
-            System.err.println("目录配置不完整，无法执行文件准备");
-            return;
-        }
-
-        java.nio.file.Path summaryDir = java.nio.file.Paths.get(summaryDirStr);
-        java.nio.file.Path publishDir = java.nio.file.Paths.get(publishDirStr);
-        java.nio.file.Path publishedDir = java.nio.file.Paths.get(publishedDirStr);
-
-        if (!java.nio.file.Files.exists(summaryDir)) {
-            System.err.println("Summary 目录不存在: " + summaryDirStr);
-            return;
-        }
-
-        try {
-            if (!java.nio.file.Files.exists(publishDir)) {
-                java.nio.file.Files.createDirectories(publishDir);
-            }
-            if (!java.nio.file.Files.exists(publishedDir)) {
-                java.nio.file.Files.createDirectories(publishedDir);
-            }
-
-            // 获取已发布的文件名集合
-            java.util.Set<String> publishedFiles = java.util.stream.Stream.of(publishedDir.toFile().list())
-                    .collect(java.util.stream.Collectors.toSet());
-            
-            // 获取 publish 目录下的文件集合 (避免重复拷贝)
-            java.util.Set<String> existingPublishFiles = java.util.stream.Stream.of(publishDir.toFile().list())
-                    .collect(java.util.stream.Collectors.toSet());
-            
-            // 计算当前发布目录下实际待发布的文件数量（过滤掉隐藏文件）
-            long currentPendingCount = existingPublishFiles.stream()
-                    .filter(name -> !name.startsWith("."))
-                    .count();
-            
-            if (currentPendingCount >= batchSize) {
-                System.out.println("发布目录已有 " + currentPendingCount + " 个文件，达到或超过批次大小 " + batchSize + "，不再补充新文件");
-                // sendTextMessageToEmployees(notifyUsers, "发布目录已有 " + currentPendingCount + " 个文件，暂不补充新文件");
-                return;
-            }
-            
-            int needed = batchSize - (int)currentPendingCount;
-
-            // 查找未发布的文件
-            List<java.nio.file.Path> candidates = java.nio.file.Files.walk(summaryDir)
-                    .filter(p -> java.nio.file.Files.isRegularFile(p) && !p.getFileName().toString().startsWith("."))
-                    .filter(p -> p.toString().endsWith("_summary.txt")) // 假设只处理摘要文件
-                    .filter(p -> !publishedFiles.contains(p.getFileName().toString()))
-                    .filter(p -> !existingPublishFiles.contains(p.getFileName().toString()))
-                    .sorted((p1, p2) -> {
-                        try {
-                            return java.nio.file.Files.getLastModifiedTime(p2).compareTo(java.nio.file.Files.getLastModifiedTime(p1));
-                        } catch (java.io.IOException e) {
-                            return 0;
-                        }
-                    })
-                    .limit(needed)
-                    .collect(java.util.stream.Collectors.toList());
-
-            if (candidates.isEmpty()) {
-                System.out.println("没有需要发布的新文件");
-                // sendTextMessageToEmployees(notifyUsers, "没有需要发布的新文件");
-                return;
-            }
-
-            int count = 0;
-            for (java.nio.file.Path src : candidates) {
-                java.nio.file.Path dest = publishDir.resolve(src.getFileName());
-                java.nio.file.Files.copy(src, dest, StandardCopyOption.REPLACE_EXISTING);
-                count++;
-            }
-            
-            try {
-                sendTextMessageToEmployees(notifyUsers, "已准备 " + count + " 个新文件到发布目录");
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
-
-        } catch (Exception e) {
-            e.printStackTrace();
-            try {
-                sendTextMessageToEmployees(notifyUsers, "准备发布文件时出错: " + e.getMessage());
-            } catch (Exception ex) {
-                ex.printStackTrace();
-            }
-        }
-    }
 
     //启动监听机器人消息回调本地线程，搭配RobotMsgCallbackConsumer来使用
     //注意：这里是阻塞线程，需要在单独的线程中调用
@@ -524,499 +426,6 @@ public class DingTalkUtil {
         }
     }
 
-    private static void handleDownloadPodCastTask(String operatorId, List<String> atUserIds, JSONObject params) {
-            int maxProcessCount = params != null && params.containsKey("maxProcessCount") ? params.getIntValue("maxProcessCount") : 50;
-            int maxTryTimes = params != null && params.containsKey("maxTryTimes") ? params.getIntValue("maxTryTimes") : 15;
-            int maxDuplicatePages = params != null && params.containsKey("maxDuplicatePages") ? params.getIntValue("maxDuplicatePages") : 5;
-            int downloadMaxProcessCount = params != null && params.containsKey("downloadMaxProcessCount") ? params.getIntValue("downloadMaxProcessCount") : 0;
-            int threadPoolSize = params != null && params.containsKey("threadPoolSize") ? params.getIntValue("threadPoolSize") : 15;
-
-            List<String> notifyUsers = new ArrayList<>();
-            if (operatorId != null) notifyUsers.add(operatorId);
-            if (atUserIds != null && !atUserIds.isEmpty()) {
-                notifyUsers.addAll(atUserIds);
-            }
-
-            if (!DOWNLOAD_LOCK.tryLock()) {
-                try {
-                    sendTextMessageToEmployees(notifyUsers, "当前已有下载任务正在执行，请稍后再试。");
-                } catch (Exception e) {
-                    e.printStackTrace();
-                }
-                return;
-            }
-
-            try {
-                sendTextMessageToEmployees(notifyUsers, "开始执行下载任务...");
-                int count = podwiseAgent.run(maxProcessCount, maxTryTimes, maxDuplicatePages, downloadMaxProcessCount, threadPoolSize);
-                sendTextMessageToEmployees(notifyUsers, "下载任务执行完毕，共下载更新了 " + count + " 条播客。");
-            } catch (Exception e) {
-                e.printStackTrace();
-                try {
-                    sendTextMessageToEmployees(notifyUsers, "下载任务执行异常: " + e.getMessage());
-                } catch (Exception ex) {
-                    ex.printStackTrace();
-                }
-            } finally {
-                DOWNLOAD_LOCK.unlock();
-            }
-        }
-
-
-
-
-        private static void handlePublishTask(String operatorId,List<String> atUserIds, JSONObject params) {
-             boolean isDraft = params != null && params.containsKey("isDraft") ? params.getBooleanValue("isDraft") : false;
-             List<String> notifyUsers = new ArrayList<>();
-             if (operatorId != null) notifyUsers.add(operatorId);
-             if (atUserIds != null && !atUserIds.isEmpty()) {
-                 notifyUsers.addAll(atUserIds);
-             }
-
-             // 如果没有操作者ID（不太可能），或者想通知所有人，可以调整这里
-             // 如果没有配置管理员，且 operatorId 为空，可能需要默认通知列表
-
-             // 尝试获取锁，如果获取失败说明有任务正在执行
-             if (!PUBLISH_LOCK.tryLock()) {
-                 try {
-                     sendTextMessageToEmployees(notifyUsers, "当前已有发布任务正在执行，请稍后再试。");
-                 } catch (Exception e) {
-                     e.printStackTrace();
-                 }
-                 return;
-             }
-
-             try {
-                 if (PODCAST_PUBLISH_DIR == null || PODCAST_PUBLISH_DIR.isEmpty()) {
-                     sendTextMessageToEmployees(notifyUsers, "发布目录未配置，请检查 podcast.cfg");
-                     return;
-                 }
-                 
-                 sendTextMessageToEmployees(notifyUsers, "开始执行发布任务...");
-
-                 // 1. 准备发布文件
-                 stageFilesForPublishing(notifyUsers);
-                 
-                 PlayWrightUtil.Connection connection = PlayWrightUtil.connectAndAutomate();
-                 if (connection == null){
-                      sendTextMessageToEmployees(notifyUsers, "无法连接到浏览器，任务终止");
-                      return;
-                 }
-                 
-                 try {
-                     // 2. 检查微信登录状态
-                     if (!checkWechatLogin(connection, notifyUsers)) {
-                         return;
-                     }
-                     
-                     // 3. 执行发布文件处理
-                     processPublishFiles(connection, notifyUsers, isDraft);
-                     
-                 } finally {
-                     PlayWrightUtil.disconnectBrowser(connection.playwright, connection.browser);
-                 }
-                 
-                 sendTextMessageToEmployees(notifyUsers, "所有发布任务执行完毕");
-                 
-             } catch (Exception e) {
-                 e.printStackTrace();
-                 try {
-                     sendTextMessageToEmployees(notifyUsers, "发布任务执行异常: " + e.getMessage());
-        } catch (Exception ex) {
-            ex.printStackTrace();
-        }
-    } finally {
-       PUBLISH_LOCK.unlock();
-    }
-}
-
-        private static void handleSendMessageTask(String operatorId, List<String> atUserIds, JSONObject params) {
-            String content = params != null ? params.getString("content") : null;
-            List<String> recipients = new ArrayList<>();
-            List<String> notFoundNames = new ArrayList<>();
-            List<String> notFoundDepartments = new ArrayList<>();
-            boolean usedDepartments = false;
-            
-            if (params != null) {
-                // 1) 优先：按部门选择（若提供则部门优先于人）
-                if (params.containsKey("departments")) {
-                    List<String> deptKeys = new ArrayList<>();
-                    Object depObj = params.get("departments");
-                    if (depObj instanceof com.alibaba.fastjson2.JSONArray) {
-                        for (Object o : (com.alibaba.fastjson2.JSONArray) depObj) {
-                            if (o != null) deptKeys.add(String.valueOf(o));
-                        }
-                    } else if (depObj instanceof java.util.Collection) {
-                        for (Object o : (java.util.Collection<?>) depObj) {
-                            if (o != null) deptKeys.add(String.valueOf(o));
-                        }
-                    } else if (depObj instanceof String) {
-                        String s = (String) depObj;
-                        if (s != null && !s.trim().isEmpty()) {
-                            String[] parts = s.split("[,，\\s]+");
-                            for (String p : parts) {
-                                if (!p.trim().isEmpty()) deptKeys.add(p.trim());
-                            }
-                        }
-                    }
-                    if (!deptKeys.isEmpty()) {
-                        try {
-                            List<DingTalkDepartment> departments = getAllDepartments(true, true);
-                            java.util.Map<String, DingTalkDepartment> deptById = new java.util.HashMap<>();
-                            java.util.Map<String, DingTalkDepartment> deptByName = new java.util.HashMap<>();
-                            for (DingTalkDepartment d : departments) {
-                                deptById.put(d.getDeptId(), d);
-                                deptByName.put(d.getName(), d);
-                            }
-                            List<String> deptRecipients = new ArrayList<>();
-                            for (String key : deptKeys) {
-                                DingTalkDepartment dept = deptById.get(key);
-                                if (dept == null) {
-                                    dept = deptByName.get(key);
-                                }
-                                if (dept != null && dept.getUserList() != null) {
-                                    for (DingTalkUser u : dept.getUserList()) {
-                                        String uid = u.getUserid();
-                                        if (uid != null && !uid.isEmpty() && !deptRecipients.contains(uid)) {
-                                            deptRecipients.add(uid);
-                                        }
-                                    }
-                                } else {
-                                    notFoundDepartments.add(key);
-                                }
-                            }
-                            if (!deptRecipients.isEmpty()) {
-                                recipients.clear();
-                                recipients.addAll(deptRecipients);
-                                usedDepartments = true;
-                            }
-                        } catch (Exception e) {
-                            e.printStackTrace();
-                        }
-                    }
-                }
-
-                // 2) 非部门路径：按用户ID或姓名选择
-                if (params.containsKey("userIds")) {
-                    Object ids = params.get("userIds");
-                    if (ids instanceof com.alibaba.fastjson2.JSONArray) {
-                        for (Object o : (com.alibaba.fastjson2.JSONArray) ids) {
-                            if (o != null) recipients.add(String.valueOf(o));
-                        }
-                    } else if (ids instanceof java.util.Collection) {
-                        for (Object o : (java.util.Collection<?>) ids) {
-                            if (o != null) recipients.add(String.valueOf(o));
-                        }
-                    } else if (ids instanceof String) {
-                        String s = (String) ids;
-                        if (s != null && !s.trim().isEmpty()) {
-                            String[] parts = s.split("[,，\\s]+");
-                            for (String p : parts) {
-                                if (!p.trim().isEmpty()) recipients.add(p.trim());
-                            }
-                        }
-                    }
-                }
-                
-                if (!usedDepartments && params.containsKey("names")) {
-                    List<String> nameList = new ArrayList<>();
-                    Object namesObj = params.get("names");
-                    if (namesObj instanceof com.alibaba.fastjson2.JSONArray) {
-                        for (Object o : (com.alibaba.fastjson2.JSONArray) namesObj) {
-                            if (o != null) nameList.add(String.valueOf(o));
-                        }
-                    } else if (namesObj instanceof java.util.Collection) {
-                        for (Object o : (java.util.Collection<?>) namesObj) {
-                            if (o != null) nameList.add(String.valueOf(o));
-                        }
-                    } else if (namesObj instanceof String) {
-                        String s = (String) namesObj;
-                        if (s != null && !s.trim().isEmpty()) {
-                            String[] parts = s.split("[,，\\s]+");
-                            for (String p : parts) {
-                                if (!p.trim().isEmpty()) nameList.add(p.trim());
-                            }
-                        }
-                    }
-
-                    if (!nameList.isEmpty()) {
-                        try {
-                            List<DingTalkDepartment> departments = getAllDepartments(true, true);
-                            java.util.Map<String, String> userMap = new java.util.HashMap<>();
-                            for (DingTalkDepartment dept : departments) {
-                                if (dept.getUserList() != null) {
-                                    for (DingTalkUser user : dept.getUserList()) {
-                                        userMap.put(user.getName(), user.getUserid());
-                                    }
-                                }
-                            }
-                            
-                            for (String name : nameList) {
-                                if (userMap.containsKey(name)) {
-                                    String uid = userMap.get(name);
-                                    if (!recipients.contains(uid)) {
-                                        recipients.add(uid);
-                                    }
-                                } else {
-                                    notFoundNames.add(name);
-                                }
-                            }
-                        } catch (Exception e) {
-                            e.printStackTrace();
-                        }
-                    }
-                }
-            }
-
-            if (!usedDepartments && atUserIds != null && !atUserIds.isEmpty()) {
-                for (String uid : atUserIds) {
-                    if (!recipients.contains(uid)) {
-                        recipients.add(uid);
-                    }
-                }
-            }
-            
-            List<String> notifyUsers = new ArrayList<>();
-            if (operatorId != null) notifyUsers.add(operatorId);
-            
-            if (content == null || content.trim().isEmpty()) {
-                try {
-                    sendTextMessageToEmployees(notifyUsers, "未提供消息内容，未执行发送。");
-                } catch (Exception e) {
-                    e.printStackTrace();
-                }
-                return;
-            }
-
-            if (!notFoundDepartments.isEmpty()) {
-                try {
-                    sendTextMessageToEmployees(notifyUsers, "未找到以下部门: " + String.join("，", notFoundDepartments) + "。请确认部门名称或ID是否正确。");
-                } catch (Exception e) {
-                    e.printStackTrace();
-                }
-                if (recipients.isEmpty()) {
-                    return;
-                }
-            }
-
-            if (!notFoundNames.isEmpty()) {
-                try {
-                    sendTextMessageToEmployees(notifyUsers, "未找到以下用户: " + String.join("，", notFoundNames) + "。请确认姓名是否正确。");
-                } catch (Exception e) {
-                    e.printStackTrace();
-                }
-                if (recipients.isEmpty()) {
-                    return;
-                }
-            }
-
-            if (recipients.isEmpty()) {
-                try {
-                    sendTextMessageToEmployees(notifyUsers, "未指定有效的接收人（部门或用户），未执行发送。");
-                } catch (Exception e) {
-                    e.printStackTrace();
-                }
-                return;
-            }
-            
-            try {
-                String senderName = null;
-                try {
-                    List<DingTalkDepartment> departments = getAllDepartments(true, true);
-                    java.util.Map<String, String> idNameMap = new java.util.HashMap<>();
-                    for (DingTalkDepartment dept : departments) {
-                        if (dept.getUserList() != null) {
-                            for (DingTalkUser user : dept.getUserList()) {
-                                idNameMap.put(user.getUserid(), user.getName());
-                            }
-                        }
-                    }
-                    if (operatorId != null) {
-                        senderName = idNameMap.get(operatorId);
-                    }
-                } catch (Exception e) {
-                    e.printStackTrace();
-                }
-                String finalContent = (senderName != null && !senderName.trim().isEmpty())
-                        ? ("【消息发起人：" + senderName + "】" + content)
-                        : ("【消息发起人：" + (operatorId != null ? operatorId : "未知") + "】" + content);
-                sendTextMessageToEmployees(recipients, finalContent);
-                sendTextMessageToEmployees(notifyUsers, "已向 " + recipients.size() + " 位用户发送消息");
-            } catch (Exception e) {
-                e.printStackTrace();
-                try {
-                    sendTextMessageToEmployees(notifyUsers, "发送消息失败: " + e.getMessage());
-                } catch (Exception ex) {
-                    ex.printStackTrace();
-                }
-            }
-        }
-    private static void handleCreateEventTask(String operatorId, List<String> atUserIds, JSONObject params) {
-        String summary = params.getString("summary");
-        String startTimeStr = params.getString("startTime");
-        String endTimeStr = params.getString("endTime");
-        String description = params.getString("description");
-        String location = params.getString("location");
-        Object attendeesObj = params.get("attendees");
-
-        List<String> notifyUsers = new ArrayList<>();
-        if (operatorId != null) notifyUsers.add(operatorId);
-
-        // 1. Resolve Attendees
-        List<String> attendeeUserIds = new ArrayList<>();
-        List<String> notFoundNames = new ArrayList<>();
-
-        if (attendeesObj != null) {
-            List<String> inputNames = new ArrayList<>();
-            if (attendeesObj instanceof com.alibaba.fastjson2.JSONArray) {
-                for (Object o : (com.alibaba.fastjson2.JSONArray) attendeesObj) {
-                    if (o != null) inputNames.add(String.valueOf(o));
-                }
-            } else if (attendeesObj instanceof java.util.Collection) {
-                for (Object o : (java.util.Collection<?>) attendeesObj) {
-                    if (o != null) inputNames.add(String.valueOf(o));
-                }
-            } else if (attendeesObj instanceof String) {
-                String s = (String) attendeesObj;
-                if (!s.trim().isEmpty()) {
-                    String[] parts = s.split("[,，\\s]+");
-                    for (String p : parts) {
-                        if (!p.trim().isEmpty()) inputNames.add(p.trim());
-                    }
-                }
-            }
-
-            if (!inputNames.isEmpty()) {
-                 try {
-                    // Try to resolve names to IDs
-                    List<DingTalkDepartment> departments = getAllDepartments(true, true);
-                    java.util.Map<String, String> userMap = new java.util.HashMap<>();
-                    for (DingTalkDepartment dept : departments) {
-                        if (dept.getUserList() != null) {
-                            for (DingTalkUser user : dept.getUserList()) {
-                                userMap.put(user.getName(), user.getUserid());
-                            }
-                        }
-                    }
-                    
-                    for (String name : inputNames) {
-                        if (userMap.containsKey(name)) {
-                            String uid = userMap.get(name);
-                            if (!attendeeUserIds.contains(uid)) {
-                                attendeeUserIds.add(uid);
-                            }
-                        } else if (userMap.containsValue(name)) { // Check if input is already an ID (less likely for name field but possible)
-                             if (!attendeeUserIds.contains(name)) {
-                                attendeeUserIds.add(name);
-                             }
-                        } else {
-                            notFoundNames.add(name);
-                        }
-                    }
-                } catch (Exception e) {
-                    e.printStackTrace();
-                }
-            }
-        }
-        
-        // Add atUserIds if any
-        if (atUserIds != null) {
-             for(String uid : atUserIds) {
-                 if(!attendeeUserIds.contains(uid)) attendeeUserIds.add(uid);
-             }
-        }
-
-        if (!notFoundNames.isEmpty()) {
-             try {
-                sendTextMessageToEmployees(notifyUsers, "创建日程警告: 未找到以下参与人: " + String.join("，", notFoundNames) + "。");
-             } catch (Exception e) {
-                e.printStackTrace();
-            }
-        }
-
-        if (attendeeUserIds.isEmpty()) {
-            try {
-                sendTextMessageToEmployees(notifyUsers, "创建日程失败: 未指定有效的参与人。");
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
-            return;
-        }
-
-        // 2. Validate Time
-        if (startTimeStr == null || endTimeStr == null) {
-             try {
-                sendTextMessageToEmployees(notifyUsers, "创建日程失败: 开始时间或结束时间缺失。");
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
-            return;
-        }
-
-        // 3. Convert Time to ISO 8601 (yyyy-MM-dd'T'HH:mm:ss+08:00)
-        String isoStartTime;
-        String isoEndTime;
-        try {
-            java.time.format.DateTimeFormatter inputFormatter = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
-            java.time.LocalDateTime localStart = java.time.LocalDateTime.parse(startTimeStr, inputFormatter);
-            java.time.LocalDateTime localEnd = java.time.LocalDateTime.parse(endTimeStr, inputFormatter);
-            
-            java.time.ZonedDateTime zonedStart = localStart.atZone(java.time.ZoneId.of("Asia/Shanghai"));
-            java.time.ZonedDateTime zonedEnd = localEnd.atZone(java.time.ZoneId.of("Asia/Shanghai"));
-            
-            isoStartTime = zonedStart.format(java.time.format.DateTimeFormatter.ISO_OFFSET_DATE_TIME);
-            isoEndTime = zonedEnd.format(java.time.format.DateTimeFormatter.ISO_OFFSET_DATE_TIME);
-        } catch (Exception e) {
-             // Fallback or rethrow, but better to let the user know input was bad if it fails here
-             // However, for safety if simple replace was working before (but getting 400), we stick to new logic
-             throw new RuntimeException("时间格式解析错误，请确保使用 yyyy-MM-dd HH:mm:ss 格式。Input: " + startTimeStr + " / " + endTimeStr);
-        }
-
-        // 4. Create Event
-        try {
-            // Using operatorId as the user to create event for
-            String unionId = getUnionIdByUserId(operatorId);
-            if (unionId == null) {
-                 throw new RuntimeException("无法获取操作人的 UnionId，无法创建日程。UserId: " + operatorId);
-            }
-            
-            // Convert attendeeUserIds to UnionIds
-            List<String> attendeeUnionIds = new ArrayList<>();
-            List<String> failedConversionUsers = new ArrayList<>();
-            for (String uid : attendeeUserIds) {
-                try {
-                    String uUnionId = getUnionIdByUserId(uid);
-                    if (uUnionId != null) {
-                        attendeeUnionIds.add(uUnionId);
-                    } else {
-                        failedConversionUsers.add(uid);
-                    }
-                } catch (Exception e) {
-                    failedConversionUsers.add(uid);
-                    e.printStackTrace();
-                }
-            }
-            
-            if (!failedConversionUsers.isEmpty()) {
-                 sendTextMessageToEmployees(notifyUsers, "警告: 无法获取以下用户的 UnionId，将被忽略: " + String.join(", ", failedConversionUsers));
-            }
-
-            if (attendeeUnionIds.isEmpty() && !attendeeUserIds.isEmpty()) {
-                 throw new RuntimeException("没有有效的参与人 (UnionId 获取失败)");
-            }
-            
-            String eventId = createCalendarEvent(unionId, summary, description, isoStartTime, isoEndTime, attendeeUnionIds, location);
-            sendTextMessageToEmployees(notifyUsers, "日程创建成功！标题: " + summary + "，时间: " + startTimeStr + " - " + endTimeStr + "，参与人数: " + attendeeUnionIds.size());
-        } catch (Exception e) {
-            e.printStackTrace();
-            try {
-                sendTextMessageToEmployees(notifyUsers, "创建日程失败: " + e.getMessage());
-            } catch (Exception ex) {
-                ex.printStackTrace();
-            }
-        }
-    }
-
     public static String getUnionIdByUserId(String userId) throws Exception {
         DingTalkClient client = new DefaultDingTalkClient("https://oapi.dingtalk.com/topapi/v2/user/get");
         com.dingtalk.api.request.OapiV2UserGetRequest req = new com.dingtalk.api.request.OapiV2UserGetRequest();
@@ -1065,147 +474,7 @@ public class DingTalkUtil {
         return null;
     }
 
-    private static boolean checkWechatLogin(PlayWrightUtil.Connection connection, List<String> notifyUsers) {
-        try {
-            com.microsoft.playwright.BrowserContext context = connection.browser.contexts().isEmpty() ? 
-                    connection.browser.newContext() : connection.browser.contexts().get(0);
-            com.microsoft.playwright.Page checkPage = context.newPage();
-            // 设置大视口，确保截图清晰
-            checkPage.setViewportSize(1920, 1080);
-            try {
-                checkPage.navigate(PodCastPostToWechat.WECHAT_LOGIN_URL);
-                checkPage.waitForLoadState(com.microsoft.playwright.options.LoadState.NETWORKIDLE);
-                if (!PodCastUtil.isWechatLoggedIn(checkPage)) {
-                    sendTextMessageToEmployees(notifyUsers, "检测到微信公众号未登录，请及时在服务器浏览器完成扫码登录，任务将继续执行等待。");
-                    
-                    // 尝试截图并发送 (需配置 dingtalk.agent.id)
-                    if (AGENT_ID != 0) {
-                        try {
-                            // 增加等待时间，确保二维码完全加载
-                            checkPage.waitForTimeout(3000); 
-                            
-                            String fileName = "login_screenshot_" + System.currentTimeMillis() + ".png";
-                            java.nio.file.Path screenshotPath = java.nio.file.Paths.get(PODCAST_PUBLISH_DIR, fileName);
-                            
-                            // 尝试定位登录框截图，清晰度更高
-                            com.microsoft.playwright.Locator loginFrame = checkPage.locator(".login_frame");
-                            if (loginFrame.isVisible()) {
-                                loginFrame.screenshot(new com.microsoft.playwright.Locator.ScreenshotOptions().setPath(screenshotPath));
-                            } else {
-                                checkPage.screenshot(new com.microsoft.playwright.Page.ScreenshotOptions().setPath(screenshotPath));
-                            }
-                            
-                            String mediaId = uploadMedia(ROBOT_CLIENT_ID, ROBOT_CLIENT_SECRET, screenshotPath.toFile());
 
-                            sendAsyncWorkTextMessage(notifyUsers, "微信公众号未登录，请扫描下方二维码进行登录： --" + System.currentTimeMillis());
-                            sendAsyncWorkImageMessage(notifyUsers, mediaId);
-                            
-                            // 上传成功后删除本地文件
-                            screenshotPath.toFile().delete();
-                        } catch (Exception e) {
-                            System.err.println("Failed to capture and send screenshot: " + e.getMessage());
-                            e.printStackTrace();
-                        }
-                    }
-                    
-                    // 阻塞等待用户扫码登录
-                    long maxWaitTime = 5 * 60 * 1000; // 5分钟超时
-                    long startTime = System.currentTimeMillis();
-                    boolean isLogged = false;
-                    
-                    while (!isLogged) {
-                        if (System.currentTimeMillis() - startTime > maxWaitTime) {
-                            sendTextMessageToEmployees(notifyUsers, "微信登录超时，任务终止。");
-                            return false;
-                        }
-                        
-                        try {
-                            Thread.sleep(3000);
-                        } catch (InterruptedException e) {
-                            Thread.currentThread().interrupt();
-                            sendTextMessageToEmployees(notifyUsers, "等待登录被中断，任务终止。");
-                            return false;
-                        }
-                        isLogged = PodCastUtil.isWechatLoggedIn(checkPage);
-                    }
-                    
-                    sendTextMessageToEmployees(notifyUsers, "微信登录成功，继续执行任务。");
-                }
-                return true;
-            } finally {
-                if (!checkPage.isClosed()) {
-                    checkPage.close();
-                }
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-            return false;
-        }
-    }
-
-    private static void processPublishFiles(PlayWrightUtil.Connection connection, List<String> notifyUsers, boolean isDraft) {
-        try {
-             PodCastPostToWechat task = new PodCastPostToWechat(connection.browser);
-             
-             java.nio.file.Path publishDirPath = java.nio.file.Paths.get(PODCAST_PUBLISH_DIR);
-             if (!java.nio.file.Files.exists(publishDirPath) || !java.nio.file.Files.isDirectory(publishDirPath)) {
-                 sendTextMessageToEmployees(notifyUsers, "发布目录不存在或无效: " + PODCAST_PUBLISH_DIR);
-                 return;
-             }
-
-             java.util.List<String> podcastFilePaths = java.nio.file.Files.walk(publishDirPath)
-                        .filter(p -> java.nio.file.Files.isRegularFile(p) && !p.getFileName().toString().startsWith(".")) // 忽略隐藏文件
-                        .map(p -> p.toString())
-                        .collect(java.util.stream.Collectors.toList());
-             
-             if (podcastFilePaths.isEmpty()) {
-                 sendTextMessageToEmployees(notifyUsers, "目录中没有找到待发布的文件: " + PODCAST_PUBLISH_DIR);
-                 return;
-             }
-             
-             for (String podcastFilePath : podcastFilePaths) {
-                  try {
-                      String result = task.publishPodcastToWechat(podcastFilePath, isDraft);
-                      if (result.startsWith(PodCastPostToWechat.SUCCESS_MSG)){
-                          sendTextMessageToEmployees(notifyUsers, "文件 " + new java.io.File(podcastFilePath).getName() + "， " + result);
-
-                          // 移动文件到已发布目录
-                          try {
-                              String publishedDirStr = AppConfig.getInstance().getPodcastPublishedDir();
-                              if (publishedDirStr != null) {
-                                  java.nio.file.Path publishedDir = java.nio.file.Paths.get(publishedDirStr);
-                                  if (!java.nio.file.Files.exists(publishedDir)) {
-                                      java.nio.file.Files.createDirectories(publishedDir);
-                                  }
-                                  java.nio.file.Path srcFile = java.nio.file.Paths.get(podcastFilePath);
-                                  java.nio.file.Path destFile = publishedDir.resolve(srcFile.getFileName());
-                                  java.nio.file.Files.move(srcFile, destFile, StandardCopyOption.REPLACE_EXISTING);
-                                  System.out.println("Moved published file to: " + destFile);
-                              }
-                          } catch (Exception moveEx) {
-                               System.err.println("Failed to move published file: " + moveEx.getMessage());
-                               moveEx.printStackTrace();
-                               sendTextMessageToEmployees(notifyUsers, "文件已发布但移动到已发布目录失败: " + moveEx.getMessage());
-                          }
-                      }
-                      else
-                          sendTextMessageToEmployees(notifyUsers, "文件 " + new java.io.File(podcastFilePath).getName() + "，发布失败: " + result);
-                      
-                  } catch (Exception e) {
-                      sendTextMessageToEmployees(notifyUsers, "文件 " + new java.io.File(podcastFilePath).getName() + " 发布失败: " + e.getMessage());
-                      e.printStackTrace();
-                  }
-             }
-         }
-         catch (Exception e) {
-             e.printStackTrace();
-             try {
-                sendTextMessageToEmployees(notifyUsers, "处理发布文件时出错: " + e.getMessage());
-             } catch (Exception ex) {
-                 ex.printStackTrace();
-             }
-         }
-    }
 
     /**
      * 解析消息中的 @ 人员列表

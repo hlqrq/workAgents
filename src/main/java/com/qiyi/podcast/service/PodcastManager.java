@@ -4,6 +4,7 @@ import com.microsoft.playwright.Browser;
 import com.qiyi.podcast.ModelType;
 import com.qiyi.podcast.PodCastItem;
 import com.qiyi.util.PFileUtil;
+import com.qiyi.util.DingTalkUtil;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -37,6 +38,11 @@ public class PodcastManager {
         } else {
             System.out.println("File list exists, skipping scan.");
             itemsToDownload = fileService.readItemListFromFile();
+            // 如果读取的文件列表数量超过了本次要求的最大数量，进行截断
+            if (itemsToDownload.size() > maxProcessCount) {
+                System.out.println("Pending list size (" + itemsToDownload.size() + ") exceeds maxProcessCount (" + maxProcessCount + "), truncating...");
+                itemsToDownload = new ArrayList<>(itemsToDownload.subList(0, maxProcessCount));
+            }
         }
 
         // Filter already downloaded
@@ -117,6 +123,12 @@ public class PodcastManager {
             return;
         }
 
+        try {
+            DingTalkUtil.sendTextMessageToEmployees(DingTalkUtil.PODCAST_ADMIN_USERS, "开始分析生成摘要，待处理文件数: " + targetFiles.length);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        
         if (maxProcessCount <= 0) maxProcessCount = targetFiles.length;
         
         ExecutorService executor = Executors.newFixedThreadPool(threadPoolSize > 0 ? threadPoolSize : 5);

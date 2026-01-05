@@ -1,0 +1,328 @@
+package com.qiyi.tools;
+
+import com.alibaba.fastjson2.JSONObject;
+import com.qiyi.util.DingTalkUtil;
+import com.qiyi.config.AppConfig;
+import com.qiyi.podcast.service.PodCastPostToWechat;
+import com.qiyi.util.PlayWrightUtil;
+import com.qiyi.util.PodCastUtil;
+
+import java.util.List;
+import java.util.ArrayList;
+import java.util.concurrent.locks.ReentrantLock;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+
+public class PublishWechatTool implements Tool {
+    private static final ReentrantLock PUBLISH_LOCK = new ReentrantLock();
+
+    @Override
+    public String getName() {
+        return "publish_wechat";
+    }
+
+    @Override
+    public String getDescription() {
+        return String.format("Publish podcast articles to WeChat Official Account. Parameters: isDraft (boolean, default %s).",
+                DingTalkUtil.Defaults.PUBLISH_IS_DRAFT);
+    }
+
+    @Override
+    public void execute(JSONObject params, String senderId, List<String> atUserIds) {
+        boolean isDraft = params != null && params.containsKey("isDraft") ? params.getBooleanValue("isDraft") : DingTalkUtil.Defaults.PUBLISH_IS_DRAFT;
+        List<String> notifyUsers = new ArrayList<>();
+        if (senderId != null) notifyUsers.add(senderId);
+        if (atUserIds != null && !atUserIds.isEmpty()) {
+            notifyUsers.addAll(atUserIds);
+        }
+
+        if (!PUBLISH_LOCK.tryLock()) {
+            try {
+                DingTalkUtil.sendTextMessageToEmployees(notifyUsers, "当前已有发布任务正在执行，请稍后再试。");
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+            return;
+        }
+
+        try {
+            String publishDirStr = AppConfig.getInstance().getPodcastPublishDir();
+            if (publishDirStr == null || publishDirStr.isEmpty()) {
+                DingTalkUtil.sendTextMessageToEmployees(notifyUsers, "发布目录未配置，请检查 podcast.cfg");
+                return;
+            }
+
+            DingTalkUtil.sendTextMessageToEmployees(notifyUsers, "开始执行发布任务...");
+
+            // 1. 准备发布文件
+            stageFilesForPublishing(notifyUsers);
+
+            PlayWrightUtil.Connection connection = PlayWrightUtil.connectAndAutomate();
+            if (connection == null){
+                DingTalkUtil.sendTextMessageToEmployees(notifyUsers, "无法连接到浏览器，任务终止");
+                return;
+            }
+
+            try {
+                // 2. 检查微信登录状态
+                if (!checkWechatLogin(connection, notifyUsers)) {
+                    return;
+                }
+
+                // 3. 执行发布文件处理
+                processPublishFiles(connection, notifyUsers, isDraft);
+
+            } finally {
+                PlayWrightUtil.disconnectBrowser(connection.playwright, connection.browser);
+            }
+
+            DingTalkUtil.sendTextMessageToEmployees(notifyUsers, "所有发布任务执行完毕");
+
+        } catch (Exception e) {
+            e.printStackTrace();
+            try {
+                DingTalkUtil.sendTextMessageToEmployees(notifyUsers, "发布任务执行异常: " + e.getMessage());
+            } catch (Exception ex) {
+                ex.printStackTrace();
+            }
+        } finally {
+            PUBLISH_LOCK.unlock();
+        }
+    }
+
+    private void stageFilesForPublishing(List<String> notifyUsers) {
+        String summaryDirStr = AppConfig.getInstance().getPodcastSummaryDir();
+        String publishDirStr = AppConfig.getInstance().getPodcastPublishDir();
+        String publishedDirStr = AppConfig.getInstance().getPodcastPublishedDir();
+        int batchSize = AppConfig.getInstance().getPodcastPublishBatchSize();
+
+        if (summaryDirStr == null || publishDirStr == null || publishedDirStr == null) {
+            System.err.println("目录配置不完整，无法执行文件准备");
+            return;
+        }
+
+        Path summaryDir = Paths.get(summaryDirStr);
+        Path publishDir = Paths.get(publishDirStr);
+        Path publishedDir = Paths.get(publishedDirStr);
+
+        if (!Files.exists(summaryDir)) {
+            System.err.println("Summary 目录不存在: " + summaryDirStr);
+            return;
+        }
+
+        try {
+            if (!Files.exists(publishDir)) {
+                Files.createDirectories(publishDir);
+            }
+            if (!Files.exists(publishedDir)) {
+                Files.createDirectories(publishedDir);
+            }
+
+            // 获取 publish 目录下的文件集合 (避免重复拷贝)
+            java.util.Set<String> existingPublishFiles = Stream.of(publishDir.toFile().list())
+                    .collect(Collectors.toSet());
+
+            // 计算当前发布目录下实际待发布的文件数量（过滤掉隐藏文件）
+            long currentPendingCount = existingPublishFiles.stream()
+                    .filter(name -> !name.startsWith("."))
+                    .count();
+
+            if (currentPendingCount >= batchSize) {
+                System.out.println("发布目录已有 " + currentPendingCount + " 个文件，达到或超过批次大小 " + batchSize + "，不再补充新文件");
+                return;
+            }
+
+            int needed = batchSize - (int)currentPendingCount;
+
+            // 查找未发布的文件
+            List<Path> candidates = Files.walk(summaryDir)
+                    .filter(p -> Files.isRegularFile(p) && !p.getFileName().toString().startsWith("."))
+                    .collect(Collectors.toList());
+            
+            // Note: In DingTalkUtil, logic was slightly truncated in reading but I can infer logic.
+            // It filters out published files.
+            // Let's implement robust logic: check if in publishedDir or publishDir.
+            
+            java.util.Set<String> publishedFiles = Stream.of(publishedDir.toFile().list())
+                    .collect(Collectors.toSet());
+            
+            List<Path> toCopy = new ArrayList<>();
+            for (Path p : candidates) {
+                String name = p.getFileName().toString();
+                if (!publishedFiles.contains(name) && !existingPublishFiles.contains(name)) {
+                    toCopy.add(p);
+                    if (toCopy.size() >= needed) break;
+                }
+            }
+            
+            if (toCopy.isEmpty()) {
+                // DingTalkUtil.sendTextMessageToEmployees(notifyUsers, "没有需要发布的新文件");
+                return;
+            }
+
+            int count = 0;
+            for (Path p : toCopy) {
+                Files.copy(p, publishDir.resolve(p.getFileName()), StandardCopyOption.REPLACE_EXISTING);
+                count++;
+            }
+            
+            DingTalkUtil.sendTextMessageToEmployees(notifyUsers, "已准备 " + count + " 个新文件到发布目录");
+
+        } catch (Exception e) {
+            e.printStackTrace();
+            try {
+                DingTalkUtil.sendTextMessageToEmployees(notifyUsers, "准备发布文件时出错: " + e.getMessage());
+            } catch (Exception ex) {
+                ex.printStackTrace();
+            }
+        }
+    }
+
+    private boolean checkWechatLogin(PlayWrightUtil.Connection connection, List<String> notifyUsers) {
+        try {
+            com.microsoft.playwright.BrowserContext context = connection.browser.contexts().isEmpty() ? 
+                    connection.browser.newContext() : connection.browser.contexts().get(0);
+            com.microsoft.playwright.Page checkPage = context.newPage();
+            // 设置大视口，确保截图清晰
+            checkPage.setViewportSize(1920, 1080);
+            try {
+                checkPage.navigate(PodCastPostToWechat.WECHAT_LOGIN_URL);
+                checkPage.waitForLoadState(com.microsoft.playwright.options.LoadState.NETWORKIDLE);
+                if (!PodCastUtil.isWechatLoggedIn(checkPage)) {
+                    DingTalkUtil.sendTextMessageToEmployees(notifyUsers, "检测到微信公众号未登录，请及时在服务器浏览器完成扫码登录，任务将继续执行等待。");
+                    
+                    // 尝试截图并发送 (需配置 dingtalk.agent.id)
+                    if (DingTalkUtil.AGENT_ID != 0) {
+                        try {
+                            // 增加等待时间，确保二维码完全加载
+                            checkPage.waitForTimeout(3000); 
+                            
+                            String publishDirStr = AppConfig.getInstance().getPodcastPublishDir();
+                            String fileName = "login_screenshot_" + System.currentTimeMillis() + ".png";
+                            Path screenshotPath = Paths.get(publishDirStr, fileName);
+                            
+                            // 尝试定位登录框截图，清晰度更高
+                            com.microsoft.playwright.Locator loginFrame = checkPage.locator(".login_frame");
+                            if (loginFrame.isVisible()) {
+                                loginFrame.screenshot(new com.microsoft.playwright.Locator.ScreenshotOptions().setPath(screenshotPath));
+                            } else {
+                                checkPage.screenshot(new com.microsoft.playwright.Page.ScreenshotOptions().setPath(screenshotPath));
+                            }
+                            
+                            String mediaId = DingTalkUtil.uploadMedia(DingTalkUtil.ROBOT_CLIENT_ID, DingTalkUtil.ROBOT_CLIENT_SECRET, screenshotPath.toFile());
+
+                            DingTalkUtil.sendAsyncWorkTextMessage(notifyUsers, "微信公众号未登录，请扫描下方二维码进行登录： --" + System.currentTimeMillis());
+                            DingTalkUtil.sendAsyncWorkImageMessage(notifyUsers, mediaId);
+                            
+                            // 上传成功后删除本地文件
+                            screenshotPath.toFile().delete();
+                        } catch (Exception e) {
+                            System.err.println("Failed to capture and send screenshot: " + e.getMessage());
+                            e.printStackTrace();
+                        }
+                    }
+                    
+                    // 阻塞等待用户扫码登录
+                    long maxWaitTime = 5 * 60 * 1000; // 5分钟超时
+                    long startTime = System.currentTimeMillis();
+                    boolean isLogged = false;
+                    
+                    while (!isLogged) {
+                        if (System.currentTimeMillis() - startTime > maxWaitTime) {
+                            DingTalkUtil.sendTextMessageToEmployees(notifyUsers, "微信登录超时，任务终止。");
+                            return false;
+                        }
+                        
+                        try {
+                            Thread.sleep(3000);
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                            DingTalkUtil.sendTextMessageToEmployees(notifyUsers, "等待登录被中断，任务终止。");
+                            return false;
+                        }
+                        isLogged = PodCastUtil.isWechatLoggedIn(checkPage);
+                    }
+                    
+                    DingTalkUtil.sendTextMessageToEmployees(notifyUsers, "微信登录成功，继续执行任务。");
+                }
+                return true;
+            } finally {
+                if (!checkPage.isClosed()) {
+                    checkPage.close();
+                }
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+            return false;
+        }
+    }
+
+    private void processPublishFiles(PlayWrightUtil.Connection connection, List<String> notifyUsers, boolean isDraft) {
+        try {
+             PodCastPostToWechat task = new PodCastPostToWechat(connection.browser);
+             String publishDirStr = AppConfig.getInstance().getPodcastPublishDir();
+             Path publishDirPath = Paths.get(publishDirStr);
+             
+             if (!Files.exists(publishDirPath) || !Files.isDirectory(publishDirPath)) {
+                 DingTalkUtil.sendTextMessageToEmployees(notifyUsers, "发布目录不存在或无效: " + publishDirStr);
+                 return;
+             }
+
+             List<String> podcastFilePaths = Files.walk(publishDirPath)
+                        .filter(p -> Files.isRegularFile(p) && !p.getFileName().toString().startsWith(".")) // 忽略隐藏文件
+                        .map(p -> p.toString())
+                        .collect(Collectors.toList());
+             
+             if (podcastFilePaths.isEmpty()) {
+                 DingTalkUtil.sendTextMessageToEmployees(notifyUsers, "目录中没有找到待发布的文件: " + publishDirStr);
+                 return;
+             }
+             
+             for (String podcastFilePath : podcastFilePaths) {
+                  try {
+                      String result = task.publishPodcastToWechat(podcastFilePath, isDraft);
+                      if (result.startsWith(PodCastPostToWechat.SUCCESS_MSG)){
+                          DingTalkUtil.sendTextMessageToEmployees(notifyUsers, "文件 " + new java.io.File(podcastFilePath).getName() + "， " + result);
+
+                          // 移动文件到已发布目录
+                          try {
+                              String publishedDirStr = AppConfig.getInstance().getPodcastPublishedDir();
+                              if (publishedDirStr != null) {
+                                  Path publishedDir = Paths.get(publishedDirStr);
+                                  if (!Files.exists(publishedDir)) {
+                                      Files.createDirectories(publishedDir);
+                                  }
+                                  Path srcFile = Paths.get(podcastFilePath);
+                                  Path destFile = publishedDir.resolve(srcFile.getFileName());
+                                  Files.move(srcFile, destFile, StandardCopyOption.REPLACE_EXISTING);
+                                  System.out.println("Moved published file to: " + destFile);
+                              }
+                          } catch (Exception moveEx) {
+                               System.err.println("Failed to move published file: " + moveEx.getMessage());
+                               moveEx.printStackTrace();
+                               DingTalkUtil.sendTextMessageToEmployees(notifyUsers, "文件已发布但移动到已发布目录失败: " + moveEx.getMessage());
+                          }
+                      }
+                      else
+                          DingTalkUtil.sendTextMessageToEmployees(notifyUsers, "文件 " + new java.io.File(podcastFilePath).getName() + "，发布失败: " + result);
+                      
+                  } catch (Exception e) {
+                      DingTalkUtil.sendTextMessageToEmployees(notifyUsers, "文件 " + new java.io.File(podcastFilePath).getName() + " 发布失败: " + e.getMessage());
+                      e.printStackTrace();
+                  }
+             }
+         }
+         catch (Exception e) {
+             e.printStackTrace();
+             try {
+                DingTalkUtil.sendTextMessageToEmployees(notifyUsers, "处理发布文件时出错: " + e.getMessage());
+             } catch (Exception ex) {
+                 ex.printStackTrace();
+             }
+         }
+    }
+}

@@ -1,4 +1,4 @@
-package com.qiyi.podcast.tools;
+package com.qiyi.podcast.service;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -271,33 +271,55 @@ public class PodCastPostToWechat {
         }
         else
         {
-            page.waitForSelector("//a[@title='首页']").click();
-            page.waitForSelector("//span[@title='内容管理']").click();
-            ElementHandle publicRecord = page.waitForSelector("//a[@title='发表记录']");
-            publicRecord.click();
+            // 循环尝试检查发布结果，支持刷新页面
+            ElementHandle publishedArticle = null;
+            int maxRetries = 3;
+            boolean found = false;
 
-            try
-            {
-                ElementHandle publishedArticle = page.waitForSelector("//div[@class='weui-desktop-block'][.//a/span[contains(text(),'" + article.getTitle().trim() + "')] and .//span[contains(text(),'已发表')]]", 
-                    new Page.WaitForSelectorOptions().setTimeout(DEFAULT_TIMEOUT_MS*4));
+            for (int i = 0; i < maxRetries; i++) {
+                try {
+                    // 每次尝试都重新导航，确保列表刷新
+                    if (i > 0) {
+                        log("未找到已发布文章，刷新页面重试 (" + i + "/" + maxRetries + ")...");
+                        page.reload();
+                        page.waitForLoadState(com.microsoft.playwright.options.LoadState.NETWORKIDLE);
+                    }
 
+                    page.waitForSelector("//a[@title='首页']", new Page.WaitForSelectorOptions().setTimeout(20000)).click();
+                    page.waitForSelector("//span[@title='内容管理']", new Page.WaitForSelectorOptions().setTimeout(20000)).click();
+                    ElementHandle publicRecord = page.waitForSelector("//a[@title='发表记录']", new Page.WaitForSelectorOptions().setTimeout(20000));
+                    publicRecord.click();
+
+                    // 检查是否有已发布的文章
+                    publishedArticle = page.waitForSelector("//div[@class='weui-desktop-block'][.//a/span[contains(text(),'" + article.getTitle().trim() + "')] and .//span[contains(text(),'已发表')]]", 
+                        new Page.WaitForSelectorOptions().setTimeout(30000)); // 30s timeout per attempt
+                    
+                    if (publishedArticle != null) {
+                        found = true;
+                        break;
+                    }
+                } catch (Exception e) {
+                    if (i == maxRetries - 1) {
+                         log("尝试 " + maxRetries + " 次后仍未找到发布文章: " + e.getMessage());
+                    }
+                }
+            }
+
+            if (found && publishedArticle != null) {
                 try
                 {
                     String articleUrl = publishedArticle.querySelector("a.weui-desktop-mass-appmsg__title").getAttribute("href");
                     result += " ，文章网页地址：" + articleUrl;
+                    log("发布文章成功：" + article.getTitle());
                 }
                 catch(Exception ex){
                     log("获取文章网页地址失败：" + article.getTitle());
                     result = "获取文章网页地址失败：" + article.getTitle();
                     ex.printStackTrace();
                 }
-                
-                log("发布文章成功：" + article.getTitle());
-            }
-            catch(Exception ex){
+            } else {
                 log("没有新的发布内容：" + article.getTitle());
                 result = "没有新的发布内容：" + article.getTitle();
-                ex.printStackTrace();
             }
         } 
 

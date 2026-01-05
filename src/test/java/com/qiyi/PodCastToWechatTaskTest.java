@@ -4,7 +4,7 @@ import com.microsoft.playwright.BrowserContext;
 import com.microsoft.playwright.Page;
 import com.qiyi.podcast.ModelType;
 import com.qiyi.podcast.service.FileService;
-import com.qiyi.podcast.tools.PodCastPostToWechat;
+import com.qiyi.podcast.service.PodCastPostToWechat;
 import com.qiyi.util.PFileUtil;
 import com.qiyi.util.PlayWrightUtil;
 import com.qiyi.wechat.WechatArticle;
