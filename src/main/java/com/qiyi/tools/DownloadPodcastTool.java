@@ -17,7 +17,7 @@ public class DownloadPodcastTool implements Tool {
 
     @Override
     public String getDescription() {
-        return String.format("Download podcasts from Podwise. Parameters: maxProcessCount (int, default %d), maxTryTimes (int, default %d), maxDuplicatePages (int, default %d), downloadMaxProcessCount (int, default %d), threadPoolSize (int, default %d).",
+        return String.format("Download podcasts from Podwise. Parameters: maxProcessCount (int, default %d) - Maximum number of new episodes to download (e.g., 'download 5 items' sets this to 5), maxTryTimes (int, default %d) - Maximum scroll attempts, maxDuplicatePages (int, default %d) - Stop after N pages of duplicates, downloadMaxProcessCount (int, default %d) - Max files to process after download (0=all), threadPoolSize (int, default %d) - Thread pool size for processing.",
                 DingTalkUtil.Defaults.DOWNLOAD_MAX_PROCESS_COUNT,
                 DingTalkUtil.Defaults.DOWNLOAD_MAX_TRY_TIMES,
                 DingTalkUtil.Defaults.DOWNLOAD_MAX_DUPLICATE_PAGES,

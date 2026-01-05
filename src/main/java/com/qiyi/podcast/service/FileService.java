@@ -13,7 +13,7 @@ import java.util.List;
 
 public class FileService {
 
-    private final String downloadDirTop;
+    private String downloadDirTop;
     private final String downloadDirOriginal;
     private final String downloadDirCn;
     private final String downloadDirSummary;
@@ -23,6 +23,11 @@ public class FileService {
 
     public FileService() {
         this.downloadDirTop = AppConfig.getInstance().getPodcastDownloadDir();
+
+        if (!this.downloadDirTop.endsWith("/")) {
+            this.downloadDirTop += "/";
+        }
+
         this.downloadDirOriginal = this.downloadDirTop + "original/";
         this.downloadDirCn = this.downloadDirTop + "cn/";
         this.downloadDirSummary = this.downloadDirTop + "summary/";

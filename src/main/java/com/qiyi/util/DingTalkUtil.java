@@ -152,6 +152,7 @@ public class DingTalkUtil {
         
         sb.append("\nUser Input: \"").append(text).append("\"\n");
         sb.append("\nReturn JSON only (no markdown, no ```json wrapper). The JSON must follow this structure:\n");
+        sb.append("IMPORTANT: Use the EXACT parameter names as defined in the tool description. Do not use aliases or invent new parameter names (e.g. use 'maxProcessCount' NOT 'count' or 'limit').\n");
         sb.append("{\n");
         if (!validSelectedTools.isEmpty()) {
             sb.append("  \"reply\": \"A polite reply in Chinese summarizing the plan. Do NOT ask for user confirmation or if they want to proceed. State that you are starting the tasks immediately.\",\n");
@@ -1197,7 +1198,7 @@ public class DingTalkUtil {
     /**
      * 发送文本消息 (Text)
      */
-    public static boolean sendTextMessageToGroup(String content, List<String> atUserIds, boolean isAtAll) {
+    public static boolean sendTextMessageToGroup_UserDefineRobotVersion(String content, List<String> atUserIds, boolean isAtAll) {
         OapiRobotSendRequest request = new OapiRobotSendRequest();
         request.setMsgtype("text");
         
@@ -1205,13 +1206,13 @@ public class DingTalkUtil {
         text.setContent(content);
         request.setText(text);
 
-        return sendRobotMessageToGroup(request, atUserIds, isAtAll);
+        return sendUserDefineRobotMessageToGroup(request, atUserIds, isAtAll);
     }
 
     /**
      * 发送链接消息 (Link) - 支持封面图
      */
-    public static boolean sendLinkMessageToGroup(String title, String text, String messageUrl, String picUrl) {
+    public static boolean sendLinkMessageToGroup_UserDefineRobotVersion(String title, String text, String messageUrl, String picUrl) {
         OapiRobotSendRequest request = new OapiRobotSendRequest();
         request.setMsgtype("link");
         
@@ -1222,14 +1223,14 @@ public class DingTalkUtil {
         link.setPicUrl(picUrl); // 这里的图片链接
         request.setLink(link);
 
-        return sendRobotMessageToGroup(request, null, false); // Link类型不支持@
+        return sendUserDefineRobotMessageToGroup(request, null, false); // Link类型不支持@
     }
 
     /**
      * 发送 Markdown 消息 - 推荐用于发送带图详情
      * 图片语法: ![alt](url)
      */
-    public static boolean sendMarkdownMessageToGroup(String title, String markdownText, List<String> atUserIds, boolean isAtAll) {
+    public static boolean sendMarkdownMessageToGroup_UserDefineRobotVersion(String title, String markdownText, List<String> atUserIds, boolean isAtAll) {
         OapiRobotSendRequest request = new OapiRobotSendRequest();
         request.setMsgtype("markdown");
         
@@ -1238,13 +1239,13 @@ public class DingTalkUtil {
         markdown.setText(markdownText);
         request.setMarkdown(markdown);
 
-        return sendRobotMessageToGroup(request, atUserIds, isAtAll);
+        return sendUserDefineRobotMessageToGroup(request, atUserIds, isAtAll);
     }
 
     /**
      * 发送 ActionCard (整体跳转)
      */
-    public static boolean sendActionCardMessageToGroup(String title, String markdownText, String btnTitle, String btnUrl) {
+    public static boolean sendActionCardMessageToGroup_UserDefineRobotVersion(String title, String markdownText, String btnTitle, String btnUrl) {
         OapiRobotSendRequest request = new OapiRobotSendRequest();
         request.setMsgtype("actionCard");
         
@@ -1256,13 +1257,14 @@ public class DingTalkUtil {
         actionCard.setSingleURL(btnUrl);
         request.setActionCard(actionCard);
 
-        return sendRobotMessageToGroup(request, null, false);
+        return sendUserDefineRobotMessageToGroup(request, null, false);
     }
 
     /**
+     * 适用于自定义的机器人，通过webhook直接调用
      * 核心发送逻辑：签名、设置@对象、执行发送
      */
-    private static boolean sendRobotMessageToGroup(OapiRobotSendRequest request, List<String> atUserIds, boolean isAtAll) {
+    private static boolean sendUserDefineRobotMessageToGroup(OapiRobotSendRequest request, List<String> atUserIds, boolean isAtAll) {
         try {
             Long timestamp = System.currentTimeMillis();
             String stringToSign = timestamp + "\n" + ROBOT_SECRET;
