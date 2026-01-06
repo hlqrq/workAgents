@@ -48,6 +48,12 @@ import com.qiyi.tools.CreateEventTool;
 import com.qiyi.tools.ShutdownAgentTool;
 import com.qiyi.tools.QueryErpOrderTool;
 import com.qiyi.tools.ErpAfterSaleTool;
+import com.qiyi.futu.fuwu.GetStockQuoteTool;
+import com.qiyi.futu.fuwu.GetMarketSnapshotTool;
+import com.qiyi.futu.fuwu.GetCurKlineTool;
+import com.qiyi.futu.fuwu.GetUserSecurityGroupTool;
+import com.qiyi.futu.fuwu.GetUserSecurityTool;
+import com.qiyi.futu.fuwu.GetGroupStockQuotesTool;
 
 //机器人方面的配置，可以参考这里：最好是企业机器人 https://open-dev.dingtalk.com/fe/app?hash=%23%2Fcorp%2Fapp#/corp/app
 //接口方面的说明可以参考这里：https://open.dingtalk.com/document/development/development-basic-concepts
@@ -100,6 +106,12 @@ public class DingTalkUtil {
         ToolRegistry.register(new ShutdownAgentTool());
         ToolRegistry.register(new QueryErpOrderTool());
         ToolRegistry.register(new ErpAfterSaleTool());
+        ToolRegistry.register(new GetStockQuoteTool());
+        ToolRegistry.register(new GetMarketSnapshotTool());
+        ToolRegistry.register(new GetCurKlineTool());
+        ToolRegistry.register(new GetUserSecurityGroupTool());
+        ToolRegistry.register(new GetUserSecurityTool());
+        ToolRegistry.register(new GetGroupStockQuotesTool());
     }
 
     private static void analyzeAndExecute(String text, String senderId, List<String> atUserIds) {
