@@ -159,6 +159,8 @@ public class DingTalkUtil {
         sb.append("\nUser Input: \"").append(text).append("\"\n");
         sb.append("\nReturn JSON only (no markdown, no ```json wrapper). The JSON must follow this structure:\n");
         sb.append("IMPORTANT: Use the EXACT parameter names as defined in the tool description. Do not use aliases or invent new parameter names (e.g. use 'maxProcessCount' NOT 'count' or 'limit').\n");
+        sb.append("Note: For tasks involving sending notifications or messages (e.g., '通知', '发消息', '发送给'), the text immediately following these keywords is typically the recipient (user name or department name). Please infer the recipient based on this context.\n");
+        sb.append("IMPORTANT: Extraction Policy: Values should generally be extracted from the user input. However, use common sense and basic semantic analysis to identify entities correctly (e.g., do not split names like '其二' into separate characters if they likely represent a single entity). You may normalize values if necessary (e.g. 'tomorrow' -> actual date), but do not invent unrelated values.\n");
         sb.append("{\n");
         if (!validSelectedTools.isEmpty()) {
             sb.append("  \"reply\": \"A polite reply in Chinese summarizing the plan. Do NOT ask for user confirmation or if they want to proceed. State that you are starting the tasks immediately.\",\n");
@@ -293,6 +295,10 @@ public class DingTalkUtil {
             int rp = s.lastIndexOf(')');
             if (lp > 0 && rp > lp) {
                 String name = s.substring(0, lp).trim();
+                // 忽略无参数占位（如：none）
+                if ("none".equalsIgnoreCase(name)) {
+                    continue;
+                }
                 String inside = s.substring(lp + 1, rp);
                 int dIdx = inside.toLowerCase().indexOf("default");
                 if (dIdx >= 0) {

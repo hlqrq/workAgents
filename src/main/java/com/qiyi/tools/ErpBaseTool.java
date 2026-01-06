@@ -69,8 +69,8 @@ public abstract class ErpBaseTool implements Tool {
         capturedApiHeaders.clear();
         page.onRequest(request -> {
             String url = request.url();
-            // Capture headers from innerapi calls
-            if (url.contains("innerapi.scm121.com") && !url.contains(".js") && !url.contains(".css")) {
+            // Capture headers from innerapi calls or the new api.erp321.com
+            if ((url.contains("innerapi.scm121.com") || url.contains("api.erp321.com")) && !url.contains(".js") && !url.contains(".css")) {
                 Map<String, String> headers = request.headers();
                 // Store headers if we haven't already, or overwrite
                 // We prefer headers from POST requests as they are likely API calls

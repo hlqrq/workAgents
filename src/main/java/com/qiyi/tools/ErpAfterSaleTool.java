@@ -21,8 +21,10 @@ import java.time.ZoneId;
 
 public class ErpAfterSaleTool extends ErpBaseTool {
     private static final String PAGE_URL = "https://sc.scm121.com/dataCenter/afterSaleEarlyWarning";
+    private static final String API_URL = "https://api.erp321.com/jst-data-report/getData/transportData";
     
     // Mapping for readable field names
+    //只有加入了对应关系，才会返回.
     private static final Map<String, String> FIELD_MAPPING = new HashMap<>();
     static {
         FIELD_MAPPING.put("wait_intercept_cnt", "待拦截总数");
@@ -120,7 +122,7 @@ public class ErpAfterSaleTool extends ErpBaseTool {
             try {
                 page.waitForRequest(request -> {
                     String url = request.url();
-                    if (url.contains("innerapi.scm121.com") && request.method().equalsIgnoreCase("POST")) {
+                    if (url.contains("api.erp321.com") && request.method().equalsIgnoreCase("POST")) {
                         String postData = request.postData();
                         if (postData != null && postData.contains("aftersale_alarm_logistics_summary")) {
                             capturedRequest[0] = request;
@@ -135,10 +137,17 @@ public class ErpAfterSaleTool extends ErpBaseTool {
                 System.out.println("Wait for request timeout or failed: " + e.getMessage());
             }
 
-            String apiUrl;
+            String apiUrl = API_URL;
             JSONObject payload;
 
             if (capturedRequest[0] != null) {
+                // We prefer the captured URL if available, but user specified one explicitly.
+                // Let's stick to the constant as user requested, or use captured if it's dynamic?
+                // User said "api请求发起的地址是...", implying we should use that.
+                // But usually captured one is safer for tokens/params.
+                // Let's use the constant if capture fails, or capture to get payload.
+                // Actually, let's use the captured URL if we found it, as it might have extra params.
+                // If not, use the constant.
                 apiUrl = capturedRequest[0].url();
                 try {
                     payload = JSONObject.parseObject(capturedRequest[0].postData());
@@ -148,10 +157,8 @@ public class ErpAfterSaleTool extends ErpBaseTool {
                 }
             } else {
                 // Fallback if capture failed
-                System.out.println("Could not capture API request, using default guess.");
-                apiUrl = "https://innerapi.scm121.com/api/inner/data/center/query"; // Guess
-                // Or try finding it from network logs if capturedApiHeaders has it? No, that's just headers.
-                // Let's hope the default payload works or the capture works.
+                System.out.println("Could not capture API request, using default URL and payload.");
+                apiUrl = API_URL;
                 payload = createDefaultPayload();
             }
             
@@ -285,10 +292,10 @@ public class ErpAfterSaleTool extends ErpBaseTool {
     private String formatAfterSaleInfo(JSONObject item) {
         StringBuilder sb = new StringBuilder();
         for (String key : item.keySet()) {
-            String label = FIELD_MAPPING.getOrDefault(key, key);
-            // Skip fields with 0 value if desired? Or show all. 
-            // User example has many 0s. Let's show non-zero or specific important ones.
-            // Or just show everything formatted.
+            if (!FIELD_MAPPING.containsKey(key)) {
+                continue;
+            }
+            String label = FIELD_MAPPING.get(key);
             sb.append(label).append(": ").append(item.get(key)).append("\n");
         }
         sb.append("----------------------------------------\n");
