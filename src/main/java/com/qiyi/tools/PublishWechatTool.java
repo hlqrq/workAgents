@@ -32,7 +32,7 @@ public class PublishWechatTool implements Tool {
     }
 
     @Override
-    public void execute(JSONObject params, String senderId, List<String> atUserIds) {
+    public String execute(JSONObject params, String senderId, List<String> atUserIds) {
         boolean isDraft = params != null && params.containsKey("isDraft") ? params.getBooleanValue("isDraft") : DingTalkUtil.Defaults.PUBLISH_IS_DRAFT;
         List<String> notifyUsers = new ArrayList<>();
         if (senderId != null) notifyUsers.add(senderId);
@@ -46,14 +46,14 @@ public class PublishWechatTool implements Tool {
             } catch (Exception e) {
                 e.printStackTrace();
             }
-            return;
+            return "Task locked";
         }
 
         try {
             String publishDirStr = AppConfig.getInstance().getPodcastPublishDir();
             if (publishDirStr == null || publishDirStr.isEmpty()) {
                 DingTalkUtil.sendTextMessageToEmployees(notifyUsers, "发布目录未配置，请检查 podcast.cfg");
-                return;
+                return "Config Error";
             }
 
             DingTalkUtil.sendTextMessageToEmployees(notifyUsers, "开始执行发布任务...");
@@ -64,23 +64,25 @@ public class PublishWechatTool implements Tool {
             PlayWrightUtil.Connection connection = PlayWrightUtil.connectAndAutomate();
             if (connection == null){
                 DingTalkUtil.sendTextMessageToEmployees(notifyUsers, "无法连接到浏览器，任务终止");
-                return;
+                return "Browser Error";
             }
 
+            String publishResult = "";
             try {
                 // 2. 检查微信登录状态
                 if (!checkWechatLogin(connection, notifyUsers)) {
-                    return;
+                    return "Login Failed";
                 }
 
                 // 3. 执行发布文件处理
-                processPublishFiles(connection, notifyUsers, isDraft);
+                publishResult = processPublishFiles(connection, notifyUsers, isDraft);
 
             } finally {
                 PlayWrightUtil.disconnectBrowser(connection.playwright, connection.browser);
             }
 
             DingTalkUtil.sendTextMessageToEmployees(notifyUsers, "所有发布任务执行完毕");
+            return "Publish Completed: " + publishResult;
 
         } catch (Exception e) {
             e.printStackTrace();
@@ -89,6 +91,7 @@ public class PublishWechatTool implements Tool {
             } catch (Exception ex) {
                 ex.printStackTrace();
             }
+            return "Error: " + e.getMessage();
         } finally {
             PUBLISH_LOCK.unlock();
         }
@@ -261,7 +264,8 @@ public class PublishWechatTool implements Tool {
         }
     }
 
-    private void processPublishFiles(PlayWrightUtil.Connection connection, List<String> notifyUsers, boolean isDraft) {
+    private String processPublishFiles(PlayWrightUtil.Connection connection, List<String> notifyUsers, boolean isDraft) {
+        StringBuilder executionResult = new StringBuilder();
         try {
              PodCastPostToWechat task = new PodCastPostToWechat(connection.browser);
              String publishDirStr = AppConfig.getInstance().getPodcastPublishDir();
@@ -269,7 +273,7 @@ public class PublishWechatTool implements Tool {
              
              if (!Files.exists(publishDirPath) || !Files.isDirectory(publishDirPath)) {
                  DingTalkUtil.sendTextMessageToEmployees(notifyUsers, "发布目录不存在或无效: " + publishDirStr);
-                 return;
+                 return "Error: Invalid publish directory";
              }
 
              List<String> podcastFilePaths = Files.walk(publishDirPath)
@@ -279,12 +283,15 @@ public class PublishWechatTool implements Tool {
              
              if (podcastFilePaths.isEmpty()) {
                  DingTalkUtil.sendTextMessageToEmployees(notifyUsers, "目录中没有找到待发布的文件: " + publishDirStr);
-                 return;
+                 return "No files to publish";
              }
              
              for (String podcastFilePath : podcastFilePaths) {
                   try {
                       String result = task.publishPodcastToWechat(podcastFilePath, isDraft);
+                      if (executionResult.length() > 0) executionResult.append("\n");
+                      executionResult.append(new java.io.File(podcastFilePath).getName()).append(": ").append(result);
+
                       if (result.startsWith(PodCastPostToWechat.SUCCESS_MSG)){
                           DingTalkUtil.sendTextMessageToEmployees(notifyUsers, "文件 " + new java.io.File(podcastFilePath).getName() + "， " + result);
 
@@ -313,6 +320,8 @@ public class PublishWechatTool implements Tool {
                   } catch (Exception e) {
                       DingTalkUtil.sendTextMessageToEmployees(notifyUsers, "文件 " + new java.io.File(podcastFilePath).getName() + " 发布失败: " + e.getMessage());
                       e.printStackTrace();
+                      if (executionResult.length() > 0) executionResult.append("\n");
+                      executionResult.append(new java.io.File(podcastFilePath).getName()).append(": Error - ").append(e.getMessage());
                   }
              }
          }
@@ -323,6 +332,8 @@ public class PublishWechatTool implements Tool {
              } catch (Exception ex) {
                  ex.printStackTrace();
              }
+             return "Error processing files: " + e.getMessage();
          }
+         return executionResult.toString();
     }
 }

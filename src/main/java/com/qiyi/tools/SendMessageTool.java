@@ -22,7 +22,7 @@ public class SendMessageTool implements Tool {
     }
 
     @Override
-    public void execute(JSONObject params, String senderId, List<String> atUserIds) {
+    public String execute(JSONObject params, String senderId, List<String> atUserIds) {
         String content = params != null ? params.getString("content") : null;
         List<String> recipients = new ArrayList<>();
         List<String> notFoundNames = new ArrayList<>();
@@ -177,7 +177,7 @@ public class SendMessageTool implements Tool {
             } catch (Exception e) {
                 e.printStackTrace();
             }
-            return;
+            return "Error: Empty content";
         }
 
         if (!notFoundDepartments.isEmpty()) {
@@ -187,7 +187,7 @@ public class SendMessageTool implements Tool {
                 e.printStackTrace();
             }
             if (recipients.isEmpty()) {
-                return;
+                return "Error: Dept not found";
             }
         }
 
@@ -198,7 +198,7 @@ public class SendMessageTool implements Tool {
                 e.printStackTrace();
             }
             if (recipients.isEmpty()) {
-                return;
+                return "Error: Name not found";
             }
         }
 
@@ -208,7 +208,7 @@ public class SendMessageTool implements Tool {
             } catch (Exception e) {
                 e.printStackTrace();
             }
-            return;
+            return "Error: No recipients";
         }
         
         try {
@@ -234,6 +234,7 @@ public class SendMessageTool implements Tool {
                     : ("【消息发起人：" + (senderId != null ? senderId : "未知") + "】" + content);
             DingTalkUtil.sendTextMessageToEmployees(recipients, finalContent);
             DingTalkUtil.sendTextMessageToEmployees(notifyUsers, "已向 " + recipients.size() + " 位用户发送消息");
+            return "Message Sent to " + recipients.size() + " users";
         } catch (Exception e) {
             e.printStackTrace();
             try {
@@ -241,6 +242,7 @@ public class SendMessageTool implements Tool {
             } catch (Exception ex) {
                 ex.printStackTrace();
             }
+            return "Error: " + e.getMessage();
         }
     }
 }

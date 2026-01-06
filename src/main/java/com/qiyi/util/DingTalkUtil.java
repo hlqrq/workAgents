@@ -46,6 +46,7 @@ import com.qiyi.tools.PublishWechatTool;
 import com.qiyi.tools.SendMessageTool;
 import com.qiyi.tools.CreateEventTool;
 import com.qiyi.tools.ShutdownAgentTool;
+import com.qiyi.tools.QueryErpOrderTool;
 
 //机器人方面的配置，可以参考这里：最好是企业机器人 https://open-dev.dingtalk.com/fe/app?hash=%23%2Fcorp%2Fapp#/corp/app
 //接口方面的说明可以参考这里：https://open.dingtalk.com/document/development/development-basic-concepts
@@ -84,6 +85,7 @@ public class DingTalkUtil {
         PARAM_NAME_MAPPING.put("location", "地点");
         PARAM_NAME_MAPPING.put("attendees", "参与人");
         PARAM_NAME_MAPPING.put("departments", "部门列表");
+        PARAM_NAME_MAPPING.put("orderId", "订单号");
 
         initClientConfig();
         registerTools();
@@ -95,6 +97,7 @@ public class DingTalkUtil {
         ToolRegistry.register(new SendMessageTool());
         ToolRegistry.register(new CreateEventTool());
         ToolRegistry.register(new ShutdownAgentTool());
+        ToolRegistry.register(new QueryErpOrderTool());
     }
 
     private static void analyzeAndExecute(String text, String senderId, List<String> atUserIds) {
@@ -138,6 +141,7 @@ public class DingTalkUtil {
         sb.append("You are an intent classifier. Analyze the user's input and map it to a sequence of tools to be executed.\n");
         sb.append("Current Date and Time: ").append(java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))).append("\n");
         sb.append("Note: If the user provides relative time (e.g., 'tomorrow', 'next week'), calculate the exact date based on the Current Date. For 'create_event', startTime and endTime MUST be in 'yyyy-MM-dd HH:mm:ss' format.\n");
+        sb.append("IMPORTANT: You can chain multiple tools. If the output of one tool is required as input for the next tool (e.g., use the result of a query as the message content), use the placeholder '{{PREV_RESULT}}' as the parameter value. This placeholder will be replaced by the actual result of the previous tool execution.\n");
         
         if (!validSelectedTools.isEmpty()) {
             sb.append("The tools available (selected from previous step) are:\n");
@@ -238,13 +242,28 @@ public class DingTalkUtil {
                 sendTextMessageToEmployees(notifyUsers, notification.toString());
             }
 
-            // 如果有缺失信息，暂时不执行任何任务，或者只执行有效的？
-            // 考虑到多任务可能有依赖（虽然用户说没交互，但通常逻辑上有），如果有一个缺失，可能整个流程都需要确认。
-            // 但用户特别指出“两个工具之间可以没有交互”，所以我们执行有效的任务。
+            // Execute valid tasks with result chaining
+            String previousResult = null;
             for (JSONObject task : validTasks) {
                 String toolName = task.getString("tool");
                 JSONObject params = task.getJSONObject("parameters");
-                ToolRegistry.get(toolName).execute(params, senderId, atUserIds);
+                
+                // Parameter substitution
+                if (previousResult != null && params != null) {
+                    for (String key : params.keySet()) {
+                        Object val = params.get(key);
+                        if (val instanceof String) {
+                            String strVal = (String) val;
+                            if (strVal.contains("{{PREV_RESULT}}")) {
+                                params.put(key, strVal.replace("{{PREV_RESULT}}", previousResult));
+                            }
+                        }
+                    }
+                }
+
+                // Execute and capture result
+                String executionResult = ToolRegistry.get(toolName).execute(params, senderId, atUserIds);
+                previousResult = executionResult;
             }
 
         } catch (Exception e) {

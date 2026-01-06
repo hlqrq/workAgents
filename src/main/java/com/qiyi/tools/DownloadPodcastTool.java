@@ -26,7 +26,7 @@ public class DownloadPodcastTool implements Tool {
     }
 
     @Override
-    public void execute(JSONObject params, String senderId, List<String> atUserIds) {
+    public String execute(JSONObject params, String senderId, List<String> atUserIds) {
         int maxProcessCount = params != null && params.containsKey("maxProcessCount") ? params.getIntValue("maxProcessCount") : DingTalkUtil.Defaults.DOWNLOAD_MAX_PROCESS_COUNT;
         int maxTryTimes = params != null && params.containsKey("maxTryTimes") ? params.getIntValue("maxTryTimes") : DingTalkUtil.Defaults.DOWNLOAD_MAX_TRY_TIMES;
         int maxDuplicatePages = params != null && params.containsKey("maxDuplicatePages") ? params.getIntValue("maxDuplicatePages") : DingTalkUtil.Defaults.DOWNLOAD_MAX_DUPLICATE_PAGES;
@@ -45,13 +45,15 @@ public class DownloadPodcastTool implements Tool {
             } catch (Exception e) {
                 e.printStackTrace();
             }
-            return;
+            return "Task locked";
         }
 
         try {
             DingTalkUtil.sendTextMessageToEmployees(notifyUsers, "开始执行下载任务...");
             int count = podwiseAgent.run(maxProcessCount, maxTryTimes, maxDuplicatePages, downloadMaxProcessCount, threadPoolSize);
-            DingTalkUtil.sendTextMessageToEmployees(notifyUsers, "下载任务执行完毕，共下载更新了 " + count + " 条播客。");
+            String result = "下载任务执行完毕，共下载更新了 " + count + " 条播客。";
+            DingTalkUtil.sendTextMessageToEmployees(notifyUsers, result);
+            return result;
         } catch (Exception e) {
             e.printStackTrace();
             try {
@@ -59,6 +61,7 @@ public class DownloadPodcastTool implements Tool {
             } catch (Exception ex) {
                 ex.printStackTrace();
             }
+            return "Error: " + e.getMessage();
         } finally {
             DOWNLOAD_LOCK.unlock();
         }

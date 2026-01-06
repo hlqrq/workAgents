@@ -26,7 +26,7 @@ public class CreateEventTool implements Tool {
     }
 
     @Override
-    public void execute(JSONObject params, String senderId, List<String> atUserIds) {
+    public String execute(JSONObject params, String senderId, List<String> atUserIds) {
         String summary = params.getString("summary");
         String startTimeStr = params.getString("startTime");
         String endTimeStr = params.getString("endTime");
@@ -133,7 +133,7 @@ public class CreateEventTool implements Tool {
             } catch (Exception e) {
                 e.printStackTrace();
             }
-            return;
+            return "Error: No attendees";
         }
 
         // 2. Validate Time
@@ -143,7 +143,7 @@ public class CreateEventTool implements Tool {
             } catch (Exception e) {
                 e.printStackTrace();
             }
-            return;
+            return "Error: Missing time";
         }
 
         // 3. Convert Time to ISO 8601 (yyyy-MM-dd'T'HH:mm:ss+08:00)
@@ -161,7 +161,13 @@ public class CreateEventTool implements Tool {
             isoEndTime = zonedEnd.format(DateTimeFormatter.ISO_OFFSET_DATE_TIME);
         } catch (Exception e) {
              // Fallback or rethrow
-             throw new RuntimeException("时间格式解析错误，请确保使用 yyyy-MM-dd HH:mm:ss 格式。Input: " + startTimeStr + " / " + endTimeStr);
+             // throw new RuntimeException("时间格式解析错误，请确保使用 yyyy-MM-dd HH:mm:ss 格式。Input: " + startTimeStr + " / " + endTimeStr);
+             try {
+                DingTalkUtil.sendTextMessageToEmployees(notifyUsers, "创建日程失败: 时间格式错误 (" + e.getMessage() + ")");
+            } catch (Exception ex) {
+                ex.printStackTrace();
+            }
+            return "Error: Time format";
         }
 
         // 4. Create Event
@@ -198,9 +204,11 @@ public class CreateEventTool implements Tool {
             }
             
             String eventId = DingTalkUtil.createCalendarEvent(unionId, summary, description, isoStartTime, isoEndTime, attendeeUnionIds, location);
-            DingTalkUtil.sendTextMessageToEmployees(notifyUsers, "日程创建成功！标题: " + summary + "，时间: " + startTimeStr + " - " + endTimeStr + "，参与人数: " + attendeeUnionIds.size());
+            String successMsg = "日程创建成功！标题: " + summary + "，时间: " + startTimeStr + " - " + endTimeStr + "，参与人数: " + attendeeUnionIds.size();
+            DingTalkUtil.sendTextMessageToEmployees(notifyUsers, successMsg);
 
             System.out.println("Event ID: " + eventId);
+            return successMsg + "，参与人: " + String.join(",", attendeeUserIds) + "，EventID: " + eventId;
         } catch (Exception e) {
             e.printStackTrace();
             try {
@@ -208,6 +216,7 @@ public class CreateEventTool implements Tool {
             } catch (Exception ex) {
                 ex.printStackTrace();
             }
+            return "Error: " + e.getMessage();
         }
     }
 }

@@ -17,7 +17,7 @@ public class ShutdownAgentTool implements Tool {
     }
 
     @Override
-    public void execute(JSONObject params, String senderId, List<String> atUserIds) {
+    public String execute(JSONObject params, String senderId, List<String> atUserIds) {
         List<String> notifyUsers = new ArrayList<>();
         if (senderId != null) notifyUsers.add(senderId);
         if (atUserIds != null && !atUserIds.isEmpty()) {
@@ -39,5 +39,6 @@ public class ShutdownAgentTool implements Tool {
             Thread.currentThread().interrupt();
         }
         System.exit(0);
+        return "已关闭钉钉机器人服务并退出 DingTalkAgent。";
     }
 }
