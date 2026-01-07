@@ -1,9 +1,10 @@
-package com.qiyi.tools;
+package com.qiyi.tools.wechat;
 
 import com.alibaba.fastjson2.JSONObject;
 import com.qiyi.util.DingTalkUtil;
 import com.qiyi.config.AppConfig;
 import com.qiyi.podcast.service.PodCastPostToWechat;
+import com.qiyi.tools.Tool;
 import com.qiyi.util.PlayWrightUtil;
 import com.qiyi.util.PodCastUtil;
 

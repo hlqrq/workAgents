@@ -1,4 +1,4 @@
-package com.qiyi.futu.fuwu;
+package com.qiyi.tools.futu;
 
 import com.futu.openapi.FTAPI;
 import com.futu.openapi.FTAPI_Conn;

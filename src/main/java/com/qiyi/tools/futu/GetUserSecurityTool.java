@@ -1,4 +1,4 @@
-package com.qiyi.futu.fuwu;
+package com.qiyi.tools.futu;
 
 import com.alibaba.fastjson2.JSONObject;
 import com.qiyi.futu.FutuOpenD;

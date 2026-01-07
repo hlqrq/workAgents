@@ -1,9 +1,11 @@
-package com.qiyi.tools;
+package com.qiyi.tools.dingtalk;
 
 import com.alibaba.fastjson2.JSONObject;
 import com.qiyi.util.DingTalkUtil;
 import com.qiyi.dingtalk.DingTalkDepartment;
 import com.qiyi.dingtalk.DingTalkUser;
+import com.qiyi.tools.Tool;
+
 import java.util.List;
 import java.util.ArrayList;
 import java.util.Map;

@@ -41,19 +41,20 @@ import com.aliyun.teaopenapi.models.Config;
 import com.aliyun.teautil.models.RuntimeOptions;
 import com.qiyi.tools.Tool;
 import com.qiyi.tools.ToolRegistry;
-import com.qiyi.tools.DownloadPodcastTool;
-import com.qiyi.tools.PublishWechatTool;
-import com.qiyi.tools.SendMessageTool;
-import com.qiyi.tools.CreateEventTool;
-import com.qiyi.tools.ShutdownAgentTool;
-import com.qiyi.tools.QueryErpOrderTool;
-import com.qiyi.tools.ErpAfterSaleTool;
-import com.qiyi.futu.fuwu.GetStockQuoteTool;
-import com.qiyi.futu.fuwu.GetMarketSnapshotTool;
-import com.qiyi.futu.fuwu.GetCurKlineTool;
-import com.qiyi.futu.fuwu.GetUserSecurityGroupTool;
-import com.qiyi.futu.fuwu.GetUserSecurityTool;
-import com.qiyi.futu.fuwu.GetGroupStockQuotesTool;
+import com.qiyi.tools.agent.ShutdownAgentTool;
+import com.qiyi.tools.android.OpenAppTool;
+import com.qiyi.tools.dingtalk.CreateEventTool;
+import com.qiyi.tools.dingtalk.SendMessageTool;
+import com.qiyi.tools.erp.ErpAfterSaleTool;
+import com.qiyi.tools.erp.QueryErpOrderTool;
+import com.qiyi.tools.futu.GetCurKlineTool;
+import com.qiyi.tools.futu.GetGroupStockQuotesTool;
+import com.qiyi.tools.futu.GetMarketSnapshotTool;
+import com.qiyi.tools.futu.GetStockQuoteTool;
+import com.qiyi.tools.futu.GetUserSecurityGroupTool;
+import com.qiyi.tools.futu.GetUserSecurityTool;
+import com.qiyi.tools.podcast.DownloadPodcastTool;
+import com.qiyi.tools.wechat.PublishWechatTool;
 
 //机器人方面的配置，可以参考这里：最好是企业机器人 https://open-dev.dingtalk.com/fe/app?hash=%23%2Fcorp%2Fapp#/corp/app
 //接口方面的说明可以参考这里：https://open.dingtalk.com/document/development/development-basic-concepts
@@ -112,6 +113,7 @@ public class DingTalkUtil {
         ToolRegistry.register(new GetUserSecurityGroupTool());
         ToolRegistry.register(new GetUserSecurityTool());
         ToolRegistry.register(new GetGroupStockQuotesTool());
+        ToolRegistry.register(new OpenAppTool());
     }
 
     private static void analyzeAndExecute(String text, String senderId, List<String> atUserIds) {
