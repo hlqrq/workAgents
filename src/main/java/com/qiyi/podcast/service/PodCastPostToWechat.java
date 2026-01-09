@@ -203,19 +203,33 @@ public class PodCastPostToWechat {
                 publishBtn.evaluate("element => element.click()");
             }
 
-            //无需声明并发表
-            publishPage.click("//button[contains(text(),'无需声明并发表')]");
-
             try
             {
-                publishBtn.click();
+                //无需声明并发表
+                com.microsoft.playwright.Locator noDeclareBtn = publishPage.locator("//button[contains(text(),'无需声明并发表')]");
+                if (noDeclareBtn.isVisible()) {
+                    noDeclareBtn.click();
+                }
             }
             catch(Exception ex)
             {
-                
+                System.out.println("无需声明并发表 检测/点击异常 (可忽略): " + ex.getMessage());
             }
 
-            publishPage.waitForSelector("//button[contains(text(),'发表')] >> visible=true",
+            // Check if final publish button is visible, if not, retry clicking the initial publish button
+            String finalPublishSelector = "//button[contains(text(),'发表')] >> visible=true";
+            if (!publishPage.isVisible(finalPublishSelector)) {
+                System.out.println("Final publish button not visible, retrying initial publish button click...");
+                try {
+                    publishBtn.click();
+                } catch (Exception e) {
+                    publishBtn.evaluate("element => element.click()");
+                }
+                // Small wait for UI update
+                try { Thread.sleep(1000); } catch (InterruptedException ignored) {}
+            }
+
+            publishPage.waitForSelector(finalPublishSelector,
                 new Page.WaitForSelectorOptions().setTimeout(DEFAULT_TIMEOUT_MS)).click();
 
             if (publishPage.isVisible("//button[contains(text(),'继续发表')]")) {
