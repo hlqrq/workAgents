@@ -27,7 +27,19 @@ public class PlayWrightUtil {
                 
                 PodCastUtil.startChromeBrowser(port);
 
-                wsEndpoint = PodCastUtil.getChromeWsEndpoint(port);
+                // Retry connecting to Chrome (up to 5 times, 2s interval)
+                for (int i = 0; i < 5; i++) {
+                    wsEndpoint = PodCastUtil.getChromeWsEndpoint(port);
+                    if (wsEndpoint != null) {
+                        break;
+                    }
+                    try {
+                        System.out.println("等待 Chrome 调试接口准备就绪... (" + (i + 1) + "/5)");
+                        Thread.sleep(2000);
+                    } catch (InterruptedException e) {
+                        e.printStackTrace();
+                    }
+                }
 
                 if (wsEndpoint == null) 
                 {

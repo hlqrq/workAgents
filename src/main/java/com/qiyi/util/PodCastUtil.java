@@ -36,9 +36,12 @@ public class PodCastUtil {
      */
     public static String getChromeWsEndpoint(int port) {
         try {
-            URL url = new URL("http://localhost:" + port + "/json/version");
+            // Use 127.0.0.1 instead of localhost to avoid IPv6 issues
+            URL url = new URL("http://127.0.0.1:" + port + "/json/version");
             HttpURLConnection conn = (HttpURLConnection) url.openConnection();
             conn.setRequestMethod("GET");
+            conn.setConnectTimeout(2000);
+            conn.setReadTimeout(2000);
             
             BufferedReader in = new BufferedReader(new InputStreamReader(conn.getInputStream()));
             StringBuilder response = new StringBuilder();
