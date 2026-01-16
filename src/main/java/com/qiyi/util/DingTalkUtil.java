@@ -583,12 +583,30 @@ public class DingTalkUtil {
                     String trimmedName = name.trim();
                     if (trimmedName.isEmpty()) continue;
                     
-                    // 尝试精确匹配
+                    // 1. 尝试精确匹配
                     if (userMap.containsKey(trimmedName)) {
                         atUserIds.add(userMap.get(trimmedName));
-                        System.out.println("DeepSeek 提取的姓名 '" + trimmedName + "' 匹配到用户ID: " + userMap.get(trimmedName));
+                        System.out.println("DeepSeek 提取的姓名 '" + trimmedName + "' 精确匹配到用户ID: " + userMap.get(trimmedName));
                     } else {
-                         System.out.println("DeepSeek 提取的姓名 '" + trimmedName + "' 未在用户列表中找到");
+                        // 2. 尝试模糊匹配 (包含关系)
+                        // 寻找所有包含 trimmedName 的名字
+                        java.util.Map<String, String> partialMatches = new java.util.HashMap<>();
+                        for (java.util.Map.Entry<String, String> entry : userMap.entrySet()) {
+                             if (entry.getKey().contains(trimmedName)) {
+                                 partialMatches.put(entry.getValue(), entry.getKey()); // ID -> Name
+                             }
+                        }
+
+                        if (partialMatches.size() == 1) {
+                            String userId = partialMatches.keySet().iterator().next();
+                            String matchedName = partialMatches.get(userId);
+                            atUserIds.add(userId);
+                            System.out.println("DeepSeek 提取的姓名 '" + trimmedName + "' 模糊匹配到唯一用户: " + matchedName + " (" + userId + ")");
+                        } else if (partialMatches.size() > 1) {
+                             System.out.println("DeepSeek 提取的姓名 '" + trimmedName + "' 模糊匹配到多个用户，存在歧义: " + partialMatches.values());
+                        } else {
+                             System.out.println("DeepSeek 提取的姓名 '" + trimmedName + "' 未在用户列表中找到");
+                        }
                     }
                 }
             }
@@ -1051,46 +1069,102 @@ public class DingTalkUtil {
         return getAllDepartments(ROBOT_CLIENT_ID, ROBOT_CLIENT_SECRET, isNeedUserList, needCache);
     }
 
+    // 刷新锁 Map
+    private static final java.util.Map<String, java.util.concurrent.atomic.AtomicBoolean> REFRESH_LOCKS = new java.util.concurrent.ConcurrentHashMap<>();
+
     public static List<DingTalkDepartment> getAllDepartments(String appKey, String appSecret, boolean isNeedUserList, boolean needCache) throws Exception {
         String cacheKey = "dingtalk_departments_v2_" + appKey + "_" + isNeedUserList;
+        // 文件名加入 appKey 以区分不同应用，防止缓存冲突
+        String safeAppKey = appKey != null ? appKey.replaceAll("[^a-zA-Z0-9.-]", "_") : "default";
+        java.io.File cacheFile = new java.io.File(System.getProperty("java.io.tmpdir"), "dingtalk_contacts_cache_" + safeAppKey + "_" + isNeedUserList + ".json");
         
+        // 1. 优先尝试文件缓存 (Stale-While-Revalidate 模式)
+        if (needCache && cacheFile.exists()) {
+            try {
+                // 读取文件
+                ObjectMapper mapper = new ObjectMapper();
+                List<DingTalkDepartment> cachedData = mapper.readValue(cacheFile, new com.fasterxml.jackson.core.type.TypeReference<List<DingTalkDepartment>>(){});
+                System.out.println("Loaded DingTalk departments from local file cache: " + cacheFile.getAbsolutePath());
+                
+                // 异步刷新逻辑：如果使用了缓存，且文件超过1天（24小时）未更新，则触发异步刷新
+                if (System.currentTimeMillis() - cacheFile.lastModified() > 24 * 3600 * 1000) {
+                    REFRESH_LOCKS.putIfAbsent(cacheKey, new java.util.concurrent.atomic.AtomicBoolean(false));
+                    java.util.concurrent.atomic.AtomicBoolean isRefreshing = REFRESH_LOCKS.get(cacheKey);
+                    
+                    if (isRefreshing.compareAndSet(false, true)) {
+                        new Thread(() -> {
+                            try {
+                                System.out.println("Local cache expired (>1 day), starting asynchronous refresh...");
+                                fetchAndCacheDepartments(appKey, appSecret, isNeedUserList, cacheKey, cacheFile);
+                                System.out.println("Asynchronous refresh of DingTalk departments completed.");
+                            } catch (Exception e) {
+                                System.err.println("Async refresh failed: " + e.getMessage());
+                            } finally {
+                                isRefreshing.set(false);
+                            }
+                        }).start();
+                    }
+                } else {
+                    System.out.println("Local cache is fresh (<1 day), skipping refresh.");
+                }
+                
+                return cachedData;
+            } catch (Exception e) {
+                System.err.println("Failed to load local file cache, falling back to sync load: " + e.getMessage());
+            }
+        }
+
+        // 2. 尝试从内存缓存获取
         if (needCache) {
-            // 尝试从缓存获取
-            String cachedData = dingTalkCache.get(cacheKey);
-            if (cachedData != null && !cachedData.isEmpty()) {
+            String cachedDataStr = dingTalkCache.get(cacheKey);
+            if (cachedDataStr != null && !cachedDataStr.isEmpty()) {
                 try {
                     ObjectMapper mapper = new ObjectMapper();
-                    return mapper.readValue(cachedData, new com.fasterxml.jackson.core.type.TypeReference<List<DingTalkDepartment>>(){});
+                    return mapper.readValue(cachedDataStr, new com.fasterxml.jackson.core.type.TypeReference<List<DingTalkDepartment>>(){});
                 } catch (Exception e) {
-                    // 如果反序列化失败，忽略缓存错误，继续执行重新获取逻辑
+                    // Ignore memory cache error
                 }
             }
         }
 
-        List<DingTalkDepartment> allDepartments = new ArrayList<>();
+        // 3. 同步加载（无缓存或读取失败）
+        return fetchAndCacheDepartments(appKey, appSecret, isNeedUserList, cacheKey, cacheFile);
+    }
 
+    private static List<DingTalkDepartment> fetchAndCacheDepartments(String appKey, String appSecret, boolean isNeedUserList, String cacheKey, java.io.File cacheFile) throws Exception {
+        List<DingTalkDepartment> allDepartments = new ArrayList<>();
         allDepartments.add(new DingTalkDepartment("1","根部门","0"));
 
         // 递归获取所有部门，从根部门 ID 1 开始
         traverseDepartments(appKey, appSecret, null, allDepartments);
 
-        if (isNeedUserList)
-        {
+        if (isNeedUserList) {
             // 为每个部门添加用户列表
             for (DingTalkDepartment dept : allDepartments) {
                 dept.setUserList(getAllUsersInDepartment(appKey, appSecret, dept.getDeptId()));
             }
         }
         
-        if (needCache) {
-            // 存入缓存
-            try {
-                ObjectMapper mapper = new ObjectMapper();
-                String jsonStr = mapper.writeValueAsString(allDepartments);
-                dingTalkCache.put(cacheKey, jsonStr, 30*60);
-            } catch (Exception e) {
-                System.err.println("Failed to serialize departments for cache: " + e.getMessage());
+        // 更新缓存
+        ObjectMapper mapper = new ObjectMapper();
+        // 存入内存缓存
+        try {
+            String jsonStr = mapper.writeValueAsString(allDepartments);
+            dingTalkCache.put(cacheKey, jsonStr, 30*60);
+        } catch (Exception e) {
+            System.err.println("Failed to update memory cache: " + e.getMessage());
+        }
+        
+        // 存入文件缓存
+        try {
+            // 确保覆盖历史文件
+            if (cacheFile.exists()) {
+                cacheFile.delete();
             }
+            mapper.writeValue(cacheFile, allDepartments);
+            System.out.println("Saved DingTalk departments to local file cache: " + cacheFile.getAbsolutePath());
+        } catch (Exception e) {
+            System.err.println("Failed to update file cache: " + e.getMessage());
         }
         
         return allDepartments;
@@ -1110,19 +1184,46 @@ public class DingTalkUtil {
     }
 
     public static DingTalkUser findUserFromDepartmentByName(String name) throws Exception {
+        if (name == null) return null;
+        name = name.trim();
+        // System.out.println("DEBUG: findUserFromDepartmentByName searching for: '" + name + "'");
+
         List<DingTalkDepartment> allDepartments = getAllDepartments(ROBOT_CLIENT_ID, ROBOT_CLIENT_SECRET, true, true);
         
+        // 用于存储模糊匹配的结果（使用Map去重，因为一个用户可能在多个部门）
+        java.util.Map<String, DingTalkUser> partialMatches = new java.util.HashMap<>();
+
         for (DingTalkDepartment dept : allDepartments) {
 
             if (dept.getUserList() != null && !dept.getUserList().isEmpty())
             {
                 for (DingTalkUser user : dept.getUserList()) {
+                    // 1. 精确匹配：直接返回
                     if (user.getName().equals(name)) {
                         return user;
+                    }
+                    // 2. 模糊匹配：收集备选
+                    if (user.getName().contains(name)) {
+                        partialMatches.put(user.getUserid(), user);
                     }
                 }
             }
         }
+        
+        // 3. 如果精确匹配未找到，且模糊匹配只有一个结果，则返回该结果
+        if (partialMatches.size() == 1) {
+            DingTalkUser user = partialMatches.values().iterator().next();
+            System.out.println("Exact match not found for '" + name + "', but found unique partial match: " + user.getName());
+            return user;
+        }
+        
+        if (partialMatches.size() > 1) {
+             System.out.println("Exact match not found for '" + name + "', and found multiple partial matches (" + partialMatches.size() + "), ambiguous. Matches: " 
+                 + partialMatches.values().stream().map(DingTalkUser::getName).collect(Collectors.joining(", ")));
+        } else if (partialMatches.isEmpty()) {
+             System.out.println("No match found for '" + name + "' in any department.");
+        }
+
         return null;
     }
 

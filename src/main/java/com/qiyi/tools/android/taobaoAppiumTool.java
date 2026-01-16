@@ -26,7 +26,9 @@ import java.net.URL;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 
 public class taobaoAppiumTool extends BaseMobileRPAProcessor implements Tool {
@@ -40,7 +42,7 @@ public class taobaoAppiumTool extends BaseMobileRPAProcessor implements Tool {
         JSONObject parmas = new JSONObject();
         parmas.put("product_name", "皮蛋瘦肉粥");
         parmas.put("product_type", "外卖商品");
-        parmas.put("target_shop_name", "三米粥铺(杭州留下店)");
+        parmas.put("target_shop_name", "三米粥铺(仓前店)");
 
         String result  = tool.execute(parmas, null, null);
 
@@ -186,75 +188,110 @@ public class taobaoAppiumTool extends BaseMobileRPAProcessor implements Tool {
 
                 StringBuilder finalResult = new StringBuilder();
 
-                // 5. Scroll to load more results (3 times)
-                for (int i = 0; i < 3; i++) {
-                     try {
-                         this.scroll(0.5, Direction.UP, 0.8);
-                         Thread.sleep(1000);
-                     } catch (Exception e) {
-                         e.printStackTrace();
-                     }
-                }
+                // 5. Scroll and find elements (Scan -> Check -> Scroll loop)
+                Set<String> processedShops = new HashSet<>();
+                boolean targetFound = false;
 
-                // 6. Find elements
-                List<WebElement> webElements = this.findElementsAndWait("//android.view.View[contains(@resource-id,\"shopItemCard\")]/android.view.View[1]", 5);
+                // Try to scan up to 5 pages
+                for (int i = 0; i < 5; i++) {
+                    // Find elements on current screen
+                    List<WebElement> webElements = this.findElementsAndWait("//android.view.View[contains(@resource-id,\"shopItemCard\")]/android.view.View[1]", 2);
 
-                StringBuilder sb = new StringBuilder();
+                    if (webElements.isEmpty() && i > 0) {
+                        System.out.println("No elements found on page " + (i + 1));
+                        break; 
+                    }
 
-                for (WebElement element : webElements) {
-                    String elementText = element.getText();
-                    sb.append("店铺信息:").append("\n");
-                    sb.append(elementText).append("\n");
-                    System.out.println(elementText); 
-
-                    // Check if this is the target shop
-                    if (targetShopName != null && !targetShopName.isEmpty() && elementText.contains(targetShopName)) {
-                        System.out.println("Found target shop: " + targetShopName + ". Entering...");
+                    for (WebElement element : webElements) {
+                        String elementText = "";
                         try {
-                            // Try to click the element directly first (as we found it)
-                            // We need to click the parent "shopItemCard" not the text view
-                            // Using UiAutomator to find the parent is safer
-                            // Regex updated to ".*shopItemCard.*" to match IDs with dynamic suffixes
-                            String uiSelector = "new UiSelector().resourceIdMatches(\".*shopItemCard.*\").childSelector(" +
-                                    "new UiSelector().textContains(\"" + targetShopName + "\"))";
-                            WebElement targetCard = driver.findElement(AppiumBy.androidUIAutomator(uiSelector));
-                            targetCard.click();
+                            elementText = element.getText();
                         } catch (Exception e) {
-                            System.err.println("Direct click failed: " + e.getMessage());
-                            try {
-                                // Fallback: Scroll and find
-                                String scrollSelector = "new UiScrollable(new UiSelector().scrollable(true)).scrollIntoView(" +
-                                        "new UiSelector().resourceIdMatches(\".*shopItemCard.*\").childSelector(" +
-                                        "new UiSelector().textContains(\"" + targetShopName + "\")))";
-                                WebElement targetCard = driver.findElement(AppiumBy.androidUIAutomator(scrollSelector));
-                                targetCard.click();
-                            } catch (Exception e2) {
-                                System.err.println("Failed to click shop card: " + e2.getMessage());
-                                DingTalkUtil.sendTextMessageToEmployees(users, "找到店铺 " + targetShopName + " 但点击失败：" + e2.getMessage());
-                                continue;
-                            }
+                            continue; // Element might have become stale
                         }
+                        
+                        // Avoid duplicates
+                        if (processedShops.contains(elementText)) {
+                            continue;
+                        }
+                        processedShops.add(elementText);
+                        
+                        finalResult.append("店铺信息:").append("\n");
+                        finalResult.append(elementText).append("\n");
+                        System.out.println(elementText);
 
+                        // Check if this is the target shop
+                        if (targetShopName != null && !targetShopName.isEmpty() && elementText.contains(targetShopName)) {
+                            System.out.println("Found target shop: " + targetShopName + ". Entering...");
+                            
+                            try {
+                                // Robust Click Logic
+                                // 1. Ensure element is visible using scrollIntoView with textContains
+                                String scrollSelector = "new UiScrollable(new UiSelector().scrollable(true)).setSwipeDeadZonePercentage(0.1).scrollIntoView(new UiSelector().textContains(\"" + targetShopName + "\"))";
+                                driver.findElement(AppiumBy.androidUIAutomator(scrollSelector));
+                                
+                                // 2. Find the card element again (parent of the text)
+                                String uiSelector = "new UiSelector().resourceIdMatches(\".*shopItemCard.*\").childSelector(" +
+                                        "new UiSelector().textContains(\"" + targetShopName + "\"))";
+                                WebElement targetCard = driver.findElement(AppiumBy.androidUIAutomator(uiSelector));
+
+                                // 3. Center the element if needed
+                                int screenHeight = driver.manage().window().getSize().getHeight();
+                                int elementY = targetCard.getLocation().getY();
+                                
+                                // Logic Correction:
+                                // If too high (Top), we need to move content DOWN (Swipe DOWN) to bring it to center.
+                                // If too low (Bottom), we need to move content UP (Swipe UP) to bring it to center.
+                                
+                                if (elementY < screenHeight / 4) {
+                                     System.out.println("Element too high (" + elementY + "), scrolling down to center...");
+                                     this.scroll(0.3, Direction.DOWN, 0.5); 
+                                     Thread.sleep(500);
+                                     targetCard = driver.findElement(AppiumBy.androidUIAutomator(uiSelector));
+                                } else if (elementY > screenHeight * 3 / 4) {
+                                     System.out.println("Element too low (" + elementY + "), scrolling up to center...");
+                                     this.scroll(0.3, Direction.UP, 0.5);
+                                     Thread.sleep(500);
+                                     targetCard = driver.findElement(AppiumBy.androidUIAutomator(uiSelector));
+                                }
+                                
+                                targetCard.click();
+                                targetFound = true;
+                                
+                                DingTalkUtil.sendTextMessageToEmployees(users, "找到并已进入店铺：" + targetShopName + "。");
+                                return "已进入店铺：" + targetShopName;
+
+                            } catch (Exception e) {
+                                System.err.println("Failed to click target shop: " + e.getMessage());
+                                DingTalkUtil.sendTextMessageToEmployees(users, "找到店铺 " + targetShopName + " 但点击失败：" + e.getMessage());
+                                processedShops.remove(elementText); // Allow retry on next loop
+                            }
+                            // Do not break inner loop here, continue scanning/scrolling if click failed
+                        }
+                    }
+                    
+                    if (targetFound) {
+                        break; // Break outer loop
+                    }
+                    
+                    // Scroll to load next page
+                    // Only scroll if we haven't reached the limit
+                    if (i < 4) {
+                        System.out.println("Scrolling to next page...");
                         try {
-                            DingTalkUtil.sendTextMessageToEmployees(users, "找到并已进入店铺：" + targetShopName + "。");
-                            
-                            // Placeholder for subsequent logic (reading new page content, searching products inside shop)
-                            // TODO: Implement reading new page content and searching for products inside the shop
-                            
-                            return "已进入店铺：" + targetShopName;
+                            this.scroll(0.5, Direction.UP, 0.8);
+                            Thread.sleep(1000);
                         } catch (Exception e) {
-                             e.printStackTrace();
+                            e.printStackTrace();
                         }
                     }
                 }
                 
-                if (targetShopName != null && !targetShopName.isEmpty()) {
+                if (targetShopName != null && !targetShopName.isEmpty() && !targetFound) {
                      String msg = "未找到目标店铺：" + targetShopName;
                      DingTalkUtil.sendTextMessageToEmployees(users, msg);
                      return msg;
                 }
-
-                finalResult.append(sb.toString());
 
                 // 7. Process with DeepSeek LLM
                 String rawData = finalResult.toString();

@@ -54,40 +54,34 @@ public class DingTalkAgent {
             }
         }
 
-        DingTalkUser user = DingTalkUtil.findUserFromDepartmentByName("岑文初");
-        if (user != null) {
-            System.out.println("用户: " + user.getName() + ", ID: " + user.getUserid());
+        // 使用配置的管理员用户列表替代硬编码用户
+        if (DingTalkUtil.PODCAST_ADMIN_USERS != null && !DingTalkUtil.PODCAST_ADMIN_USERS.isEmpty()) {
+            for (String adminUserId : DingTalkUtil.PODCAST_ADMIN_USERS) {
+                DingTalkUser targetUser = null;
+                // 尝试从已加载的部门列表中查找用户详情以便显示名称
+                for (DingTalkDepartment dept : allDepartments) {
+                    if (dept.getUserList() != null) {
+                        for (DingTalkUser u : dept.getUserList()) {
+                            if (u.getUserid().equals(adminUserId)) {
+                                targetUser = u;
+                                break;
+                            }
+                        }
+                    }
+                    if (targetUser != null) break;
+                }
 
-            //0.发送文本给单用户
-            DingTalkUtil.sendTextMessageToEmployees(Arrays.asList(user.getUserid()),"机器人服务已启动！");
+                if (targetUser != null) {
+                    System.out.println("用户: " + targetUser.getName() + ", ID: " + targetUser.getUserid());
+                } else {
+                    System.out.println("用户ID: " + adminUserId + " (未在部门列表中找到详情)");
+                }
 
-            // // 1. 发送文本消息
-            // DingTalkUtil.sendTextMessageToGroup("测试文本消息：钉钉，让进步发生", Arrays.asList(user.getUserid()), false);
-
-            // // 2. 发送 Link 消息 (带图片)
-            // DingTalkUtil.sendLinkMessageToGroup(
-            //         "时代的火车向前开",
-            //         "这个即将发布的新版本，创始人xx称它为红树林。",
-            //         "https://www.dingtalk.com/",
-            //         "https://img.alicdn.com/tfs/TB1NwmBEL9TBuNjy1zbXXXpepXa-2400-1218.png"
-            // );
-
-            // // 3. 发送 Markdown 消息 (支持正文插入图片)
-            // String markdownText = "#### 杭州天气 \n" +
-            //         "> 9度，西北风1级，空气良89，相对温度73%\n\n" +
-            //         "> ![screenshot](https://img.alicdn.com/tfs/TB1NwmBEL9TBuNjy1zbXXXpepXa-2400-1218.png)\n" +
-            //         "> ###### 10点20分发布 [天气](https://www.dingtalk.com/) \n";
-            // DingTalkUtil.sendMarkdownMessageToGroup("杭州天气", markdownText, Arrays.asList(user.getUserid()), false);
-            
-            // // 4. 发送 ActionCard (独立跳转卡片)
-            // DingTalkUtil.sendActionCardMessageToGroup(
-            //         "乔布斯 20 年前想打造一间苹果咖啡厅",
-            //         "![screenshot](https://img.alicdn.com/tfs/TB1NwmBEL9TBuNjy1zbXXXpepXa-2400-1218.png) \n\n ### 乔布斯 20 年前想打造的苹果咖啡厅 \n\n Apple Store 的设计正从原来满满的科技感走向生活化，而其生活化的走向其实可以追溯到 20 年前苹果一个建立咖啡馆的计划",
-            //         "阅读全文",
-            //         "https://www.dingtalk.com/"
-            //);
+                // 0.发送文本给单用户
+                DingTalkUtil.sendTextMessageToEmployees(Arrays.asList(adminUserId), "新的一天，看看我帮啥忙～");
+            }
         } else {
-            System.out.println("未找到用户: 岑文初");
+            System.out.println("未配置 podcast.admin.users，请在 podcast.cfg 中配置");
         }
 
         //交互的读取控制台消息，来判断是否要暂停机器人消息回调

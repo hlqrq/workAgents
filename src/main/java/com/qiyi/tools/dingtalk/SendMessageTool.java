@@ -135,19 +135,10 @@ public class SendMessageTool implements Tool {
 
                 if (!nameList.isEmpty()) {
                     try {
-                        List<DingTalkDepartment> departments = DingTalkUtil.getAllDepartments(true, true);
-                        Map<String, String> userMap = new HashMap<>();
-                        for (DingTalkDepartment dept : departments) {
-                            if (dept.getUserList() != null) {
-                                for (DingTalkUser user : dept.getUserList()) {
-                                    userMap.put(user.getName(), user.getUserid());
-                                }
-                            }
-                        }
-                        
                         for (String name : nameList) {
-                            if (userMap.containsKey(name)) {
-                                String uid = userMap.get(name);
+                            DingTalkUser user = DingTalkUtil.findUserFromDepartmentByName(name);
+                            if (user != null) {
+                                String uid = user.getUserid();
                                 if (!recipients.contains(uid)) {
                                     recipients.add(uid);
                                 }
