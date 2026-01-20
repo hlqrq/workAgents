@@ -4,6 +4,7 @@ import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
 import com.qiyi.util.LLMUtil;
+import com.qiyi.config.AppConfig;
 import com.qiyi.tools.context.ConsoleToolContext;
 
 import java.util.ArrayList;
@@ -19,6 +20,7 @@ import com.qiyi.tools.dingtalk.SearchDingTalkUserTool;
 import com.qiyi.tools.dingtalk.SendMessageTool;
 import com.qiyi.tools.erp.ErpAfterSaleTool;
 import com.qiyi.tools.erp.QueryErpOrderTool;
+import com.qiyi.tools.example.HelloWorldTool;
 import com.qiyi.tools.futu.*;
 import com.qiyi.tools.podcast.DownloadPodcastTool;
 import com.qiyi.tools.wechat.PublishWechatTool;
@@ -55,6 +57,59 @@ public class ToolManager {
         PARAM_NAME_MAPPING.put("orderId", "订单号");
         PARAM_NAME_MAPPING.put("name", "用户姓名关键词");
     }
+    
+    /**
+     * 尝试解析直接命令
+     * 格式: tool_name key="value" key2="value2"
+     * 如果匹配成功并执行，返回 true；否则返回 false（交给 LLM 处理）。
+     */
+    static boolean tryExecuteDirectCommand(String text, ToolContext context) {
+        if (text == null || text.trim().isEmpty()) return false;
+        
+        String[] parts = text.trim().split("\\s+", 2);
+        String toolName = parts[0];
+        
+        if (!ToolRegistry.contains(toolName)) {
+            return false;
+        }
+
+        String args = (parts.length > 1) ? parts[1].trim() : "";
+        JSONObject params = new JSONObject();
+        boolean hasExplicitParams = false;
+
+        if (!args.isEmpty()) {
+            // Simple regex for key="value" or key=value
+            java.util.regex.Pattern p = java.util.regex.Pattern.compile("(\\w+)=(?:\"([^\"]*)\"|([^\\s]+))");
+            java.util.regex.Matcher m = p.matcher(args);
+            while (m.find()) {
+                hasExplicitParams = true;
+                String key = m.group(1);
+                String value = m.group(2) != null ? m.group(2) : m.group(3);
+                params.put(key, value);
+            }
+            
+            // 如果有参数部分，但没有解析出任何 key=value 形式的参数，
+            // 且该工具不是那种"无参也可"的特殊情况（这里简单处理：只要有文本但没key=value，就认为是自然语言）
+            // 则认为是自然语言描述，交给 LLM 处理
+            if (!hasExplicitParams) {
+                return false;
+            }
+        }
+
+        try {
+            System.out.println("Directly executing tool: " + toolName);
+            ToolRegistry.get(toolName).execute(params, context);
+            return true;
+        } catch (Exception e) {
+            System.err.println("Direct execution failed: " + e.getMessage());
+            if (context != null) {
+                try {
+                    context.sendText("Tool execution failed: " + e.getMessage());
+                } catch(Exception ex) {}
+            }
+            return true;
+        }
+    }
 
     /**
      * 初始化工具注册
@@ -70,6 +125,7 @@ public class ToolManager {
         }
 
         ToolRegistry.register(new DownloadPodcastTool());
+        ToolRegistry.register(new HelloWorldTool());
         ToolRegistry.register(new PublishWechatTool());
         ToolRegistry.register(new SendMessageTool());
         ToolRegistry.register(new SearchDingTalkUserTool());
@@ -105,6 +161,17 @@ public class ToolManager {
      * @param context 工具执行上下文
      */
     public static void analyzeAndExecute(String text, ToolContext context) {
+        // Step 0: Try Direct Command Execution
+        // If DeepSeek is configured, skip direct command execution to prefer standard LLM mode
+        // This ensures that when LLM capabilities are available, we leverage them for better intent understanding
+        String deepSeekKey = AppConfig.getInstance().getDeepSeekApiKey();
+        boolean isDeepSeekConfigured = deepSeekKey != null && !deepSeekKey.trim().isEmpty();
+
+        if (!isDeepSeekConfigured && tryExecuteDirectCommand(text, context)) {
+            System.out.println("DeepSeek configuration not found. Tool executed in direct mode without LLM.");
+            return;
+        }
+
         // Step 1: Tool Selection
         StringBuilder selectionPrompt = new StringBuilder();
         selectionPrompt.append("You are an intent classifier. Analyze the user's input and select the tools that might be needed.\n");

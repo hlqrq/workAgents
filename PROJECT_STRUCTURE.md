@@ -75,19 +75,24 @@ src/main/java/com/qiyi
   - **核心功能**: 处理弹窗、关键词搜索、进店、商品加购、下单流程。
   - **特点**: 支持重试机制、页面滚动查找、钉钉消息实时反馈。
 
-#### 2.2.2 钉钉工具 (`com.qiyi.tools.dingtalk`)
+#### 2.2.2 示例工具 (`com.qiyi.tools.example`)
+- **HelloWorldTool**: 新手入门工具。
+  - **功能**: 演示基础的参数接收、消息发送，并提供进阶开发指引（如 LLM 调用代码示例）。
+  - **用途**: 供开发者调试环境和学习如何编写自定义 Tool。
+
+#### 2.2.3 钉钉工具 (`com.qiyi.tools.dingtalk`)
 - **SendMessageTool**: 发送钉钉消息。
 - **CreateEventTool**: 创建钉钉日程/事件。
 - **SearchDingTalkUserTool**: 通过用户名的模糊搜索来查询钉钉用户的 Uid。
 
 
-#### 2.2.3 证券金融 (`com.qiyi.tools.futu`)
+#### 2.2.4 证券金融 (`com.qiyi.tools.futu`)
 - **GetStockQuoteTool**: 获取股票实时报价。
 - **GetMarketSnapshotTool**: 获取市场快照。
 - **GetCurKlineTool**: 获取 K 线数据。
 - 包含其他多个针对富途 API 的封装工具。
 
-#### 2.2.4 ERP 系统 (`com.qiyi.tools.erp`)
+#### 2.2.5 ERP 系统 (`com.qiyi.tools.erp`)
 - **ErpBaseTool**: ERP 工具基类，处理登录会话和基础请求。
 - **QueryErpOrderTool**: 查询 ERP 订单状态。
 - **ErpAfterSaleTool**: 处理售后单据。

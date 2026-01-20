@@ -7,6 +7,9 @@
   b.将 UserId后面的信息，填入到podcast.admin.users=  后面。
   c.启动 DingTalkAgent将会收到一条机器人的消息，然后就可以对话互动了。
 
+3.保留了一个helloworld的Tools，初期使用和测试，可以通过这个类的修改和调试，来熟悉整个系统架构。
+   在tools/example/HelloWorldTool.java  如果配置了deepseek，就可以使用大模型模式的语言解析，否则只能用参数调用
+
 注意：
   1.钉钉相关接口，两种模式下都能使用。
   2.erp相关操作，需要登陆erp。
