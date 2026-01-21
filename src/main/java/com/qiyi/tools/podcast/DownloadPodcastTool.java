@@ -16,7 +16,7 @@ public class DownloadPodcastTool implements Tool {
 
     public static final int DOWNLOAD_MAX_PROCESS_COUNT = 50;
     public static final int DOWNLOAD_MAX_TRY_TIMES = 15;
-    public static final int DOWNLOAD_MAX_DUPLICATE_PAGES = 5;
+    public static final int DOWNLOAD_MAX_DUPLICATE_PAGES = 10;
     public static final int DOWNLOAD_DOWNLOAD_MAX_PROCESS_COUNT = 0;
     public static final int DOWNLOAD_THREAD_POOL_SIZE = 15;
     public static final boolean PUBLISH_IS_DRAFT = false;

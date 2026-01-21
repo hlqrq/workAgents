@@ -8,6 +8,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 import com.alibaba.dashscope.aigc.generation.Generation;
 import com.alibaba.dashscope.aigc.generation.GenerationParam;
@@ -40,6 +41,7 @@ import io.github.pigmesh.ai.deepseek.core.chat.ChatCompletionRequest;
 import io.github.pigmesh.ai.deepseek.core.chat.ChatCompletionResponse;
 import io.github.pigmesh.ai.deepseek.core.chat.UserMessage;
 import io.github.pigmesh.ai.deepseek.core.shared.StreamOptions;
+import okhttp3.OkHttpClient;
 import reactor.core.publisher.Flux;
 
 public class LLMUtil {
@@ -139,11 +141,14 @@ public class LLMUtil {
 
     public static String chatWithDeepSeek(String prompt) {
         String responseText = "";
+
         DeepSeekClient deepseekClient = new DeepSeekClient.Builder()
                 .openAiApiKey(AppConfig.getInstance().getDeepSeekApiKey())
                 .baseUrl("https://api.deepseek.com")
-                .connectTimeout(java.time.Duration.ofSeconds(120))
-                .readTimeout(java.time.Duration.ofSeconds(600))
+                .connectTimeout(java.time.Duration.ofSeconds(30))  // 连接超时
+                .writeTimeout(java.time.Duration.ofSeconds(30))   // 写入超时（发送请求）
+                .readTimeout(java.time.Duration.ofSeconds(600))   // 读取超时（等待响应）
+                .callTimeout(java.time.Duration.ofSeconds(610))   // 整个调用超时，比readTimeout稍长
                 .model("deepseek-chat")
                 .build();
 
