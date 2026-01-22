@@ -479,7 +479,7 @@ public class LLMUtil {
         try {
             OllamaChatRequestBuilder builder = OllamaChatRequestBuilder.getInstance(modelName);
             builder.withKeepAlive("10m");
-            builder.withThinking(true);
+            builder.withThinking(isThinking);
 
             if (chatHistroy != null)
                 builder.withMessage(OllamaChatMessageRole.ASSISTANT, chatHistroy);
@@ -538,12 +538,7 @@ public class LLMUtil {
              if (isThinking)
                 chatResult = ollamaAPI.chat(request, thinkHandler,responseHandler);
              else
-                chatResult = ollamaAPI.chat(request, new OllamaStreamHandler() {
-                    @Override
-                    public void accept(String s) {
-                        //System.out.print(s.toLowerCase());
-                    }
-                },responseHandler);
+                chatResult = ollamaAPI.chat(request,null,responseHandler);
 
              return chatResult;
         } catch (Exception e) {
