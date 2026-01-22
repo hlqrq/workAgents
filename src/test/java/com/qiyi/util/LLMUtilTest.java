@@ -16,15 +16,32 @@ public class LLMUtilTest {
 
     private static final String MODEL_NAME = LLMUtil.OLLAMA_MODEL_QWEN3_8B;
     private static final String VL_MODEL_NAME = LLMUtil.OLLAMA_MODEL_QWEN3_VL_8B;
-    private static final String VL_MODEL_DEEPSEEK_NAME = LLMUtil.OLLAMA_MODEL_DEEPSEEK_OCR;
+    private static final String TRANSLATION_MODEL_NAME = LLMUtil.OLLAMA_MODEL_HUNYUAN_MT;
     public static final String OLLAMA_HOST = "http://192.168.3.60:11434";
 
     public static void main(String[] args)
     {
         LLMUtilTest  test = new LLMUtilTest();
-        test.testChatWithOllama();
-        test.testChatWithOllamaStreaming();
-        test.testChatWithOllamaImage();
+        //test.testChatWithOllama();
+        //test.testChatWithOllamaStreaming();
+        //test.testChatWithOllamaImage();
+        test.testChatWithOllamaTranslation();
+    }
+
+    @Test
+    public void testChatWithOllamaTranslation() {
+        System.out.println("=== Testing chatWithOllamaTranslation ===");
+        String sourceText = "你好，我很高兴到杭州，希望我们有个美好的假期";
+        String prompt = "Translate the following segment into <" + HunyuanLanguage.JAPANESE.getCode() + ">, without additional explanation. \n\n " + sourceText;
+        
+        long startTime = System.currentTimeMillis();
+        String response = LLMUtil.chatWithOllama(prompt, TRANSLATION_MODEL_NAME, null, false, OLLAMA_HOST);
+        long endTime = System.currentTimeMillis();
+        System.out.println("Execution time: " + (endTime - startTime) + "ms");
+        System.out.println("Response: " + response);
+        if (response.isEmpty()) {
+            System.err.println("Response is empty. Make sure Ollama is running and model '" + TRANSLATION_MODEL_NAME + "' is available.");
+        }
     }
 
     @Test
@@ -157,27 +174,5 @@ public class LLMUtilTest {
         {
              System.err.println("Response object is null. Make sure Ollama is running and model '" + VL_MODEL_NAME + "' is available.");
         }
-
-
-        System.out.println("=== Testing chatWithOllamaImage 2 ===");
-        prompt = "抽取一下信息";
-
-        
-        startTime = System.currentTimeMillis();
-        response = LLMUtil.chatWithOllamaImage(prompt, VL_MODEL_DEEPSEEK_NAME, null, false, images,OLLAMA_HOST);
-        endTime = System.currentTimeMillis();
-        System.out.println("Execution time: " + (endTime - startTime) + "ms");
-        
-         if (response != null) {
-             System.out.println("HTTP Status: " + response.getHttpStatusCode());
-             if (response.getResponseModel() != null) {
-                  System.out.println(VL_MODEL_DEEPSEEK_NAME + " Response Content: " + response.getResponseModel().getMessage().getContent());
-             }
-        }
-        else
-        {
-             System.err.println("Response is empty. Make sure Ollama is running and model '" + VL_MODEL_DEEPSEEK_NAME + "' is available.");
-        }
-
     }
 }

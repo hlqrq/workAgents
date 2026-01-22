@@ -63,9 +63,9 @@ public class LLMUtil {
     }
 
     public static final String OLLAMA_HOST = "http://localhost:11434";
-    public static final String OLLAMA_MODEL_DEEPSEEK_OCR = "deepseek-ocr:3b";
     public static final String OLLAMA_MODEL_QWEN3_VL_8B = "qwen3-vl:8b";
     public static final String OLLAMA_MODEL_QWEN3_8B = "qwen3:8b";
+    public static final String OLLAMA_MODEL_HUNYUAN_MT = "hunyuan-mt:latest";
 
     // --- Alibaba Cloud (Qwen) ---
 
