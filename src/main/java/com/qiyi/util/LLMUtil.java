@@ -8,7 +8,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
 
 import com.alibaba.dashscope.aigc.generation.Generation;
 import com.alibaba.dashscope.aigc.generation.GenerationParam;
@@ -41,8 +40,16 @@ import io.github.pigmesh.ai.deepseek.core.chat.ChatCompletionRequest;
 import io.github.pigmesh.ai.deepseek.core.chat.ChatCompletionResponse;
 import io.github.pigmesh.ai.deepseek.core.chat.UserMessage;
 import io.github.pigmesh.ai.deepseek.core.shared.StreamOptions;
-import okhttp3.OkHttpClient;
 import reactor.core.publisher.Flux;
+
+import io.github.ollama4j.OllamaAPI;
+import io.github.ollama4j.models.chat.OllamaChatMessage;
+import io.github.ollama4j.models.chat.OllamaChatRequest;
+import io.github.ollama4j.models.chat.OllamaChatRequestBuilder;
+import io.github.ollama4j.models.chat.OllamaChatResult;
+import io.github.ollama4j.models.generate.OllamaStreamHandler;
+
+import io.github.ollama4j.models.chat.OllamaChatMessageRole;
 
 public class LLMUtil {
 
@@ -51,8 +58,14 @@ public class LLMUtil {
         DEEPSEEK,
         GEMINI,
         ALIYUN,
-        ALIYUN_VL
+        ALIYUN_VL,
+        OLLAMA // Added Ollama support
     }
+
+    public static final String OLLAMA_HOST = "http://localhost:11434";
+    public static final String OLLAMA_MODEL_DEEPSEEK_OCR = "deepseek-ocr:3b";
+    public static final String OLLAMA_MODEL_QWEN3_VL_8B = "qwen3-vl:8b";
+    public static final String OLLAMA_MODEL_QWEN3_8B = "qwen3:8b";
 
     // --- Alibaba Cloud (Qwen) ---
 
@@ -436,6 +449,161 @@ public class LLMUtil {
             }
         } catch (Exception e) {
             e.printStackTrace();
+        }
+    }
+
+    // --- Ollama ---
+
+    /**
+     * 与本地 Ollama 模型进行简单对话
+     * 
+     * @param prompt 提示词
+     * @param modelName 模型名称
+     * @return 模型回复
+     */
+    public static String chatWithOllama(String prompt, String modelName,String chatHistroy,boolean isThinking) {
+        String host = OLLAMA_HOST;
+        OllamaAPI ollamaAPI = new OllamaAPI(host);
+        ollamaAPI.setRequestTimeoutSeconds(120);
+        try {
+            OllamaChatRequestBuilder builder = OllamaChatRequestBuilder.getInstance(modelName);
+            builder.withKeepAlive("10m");
+            builder.withThinking(true);
+
+            if (chatHistroy != null)
+                builder.withMessage(OllamaChatMessageRole.ASSISTANT, chatHistroy);
+
+            builder.withMessage(OllamaChatMessageRole.USER, prompt);
+            OllamaChatRequest request = builder.build();
+            OllamaChatResult chatResult = ollamaAPI.chat(request);
+            return chatResult.getResponseModel().getMessage().getContent();
+        } catch (Exception e) {
+             System.err.println("Ollama Chat Error: " + e.getMessage());
+             e.printStackTrace();
+             return "";
+        }
+    }
+
+    /**
+     * 与本地 Ollama 模型进行流式对话
+     * 
+     * @param prompt 提示词
+     * @param modelName 模型名称
+     * @param handler 流式处理器
+     * @return 完整回复
+     */
+    public static OllamaChatResult chatWithOllamaStreaming(String prompt, String modelName,String chatHistroy,boolean isThinking,
+                                                                    OllamaStreamHandler thinkHandler,OllamaStreamHandler responseHandler) {
+        String host = OLLAMA_HOST;
+        OllamaAPI ollamaAPI = new OllamaAPI(host);
+        ollamaAPI.setRequestTimeoutSeconds(120);
+        try {
+             OllamaChatRequestBuilder builder = OllamaChatRequestBuilder.getInstance(modelName);
+             builder.withKeepAlive("10m");
+             builder.withMessage(OllamaChatMessageRole.USER, prompt);
+
+             builder.withThinking(isThinking);
+
+            if (chatHistroy != null)
+                builder.withMessage(OllamaChatMessageRole.ASSISTANT, chatHistroy);
+
+             OllamaChatRequest request = builder.build();
+             
+             OllamaChatResult chatResult;
+             
+             if (isThinking)
+                chatResult = ollamaAPI.chat(request, thinkHandler,responseHandler);
+             else
+                chatResult = ollamaAPI.chat(request, new OllamaStreamHandler() {
+                    @Override
+                    public void accept(String s) {
+                        //System.out.print(s.toLowerCase());
+                    }
+                },responseHandler);
+
+             return chatResult;
+        } catch (Exception e) {
+             System.err.println("Ollama Streaming Chat Error: " + e.getMessage());
+             e.printStackTrace();
+             return null;
+        }
+    }
+
+    
+    /**
+     * 与本地 Ollama 模型进行带图片对话
+     * 
+     * @param prompt 提示词
+     * @param modelName 模型名称 (e.g. qwen3-vl:8b)
+     * @param imageSources 图片路径列表 (支持本地文件路径或HTTP/HTTPS链接)
+     * @return 模型回复
+     */
+    public static String chatWithOllamaImage(String prompt, String modelName,String chatHistroy,boolean isThinking, List<String> imageSources) {
+        String host = OLLAMA_HOST;
+        OllamaAPI ollamaAPI = new OllamaAPI(host);
+        ollamaAPI.setRequestTimeoutSeconds(120);
+        ollamaAPI.setVerbose(false); // Disable verbose to avoid NPE in library logging if response fields are null
+        try {
+            List<byte[]> images = new ArrayList<>();
+            if (imageSources != null) {
+                for (String src : imageSources) {
+                    try {
+                        byte[] imageBytes;
+                        if (src.startsWith("http://") || src.startsWith("https://")) {
+                            // Download from URL with optimization (timeout, UA)
+                            java.net.URL url = java.net.URI.create(src).toURL();
+                            java.net.URLConnection conn = url.openConnection();
+                            conn.setConnectTimeout(10000); // 10 seconds connect timeout
+                            conn.setReadTimeout(30000);    // 30 seconds read timeout
+                            
+                            // Set a User-Agent to avoid being blocked by some servers
+                            conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36");
+                            
+                            try (java.io.InputStream in = conn.getInputStream()) {
+                                java.io.ByteArrayOutputStream buffer = new java.io.ByteArrayOutputStream();
+                                int nRead;
+                                byte[] data = new byte[16384];
+                                while ((nRead = in.read(data, 0, data.length)) != -1) {
+                                    buffer.write(data, 0, nRead);
+                                }
+                                imageBytes = buffer.toByteArray();
+                            }
+                        } else {
+                            // Read from local file
+                            imageBytes = Files.readAllBytes(Paths.get(src));
+                        }
+                        images.add(imageBytes);
+                    } catch (IOException e) {
+                        System.err.println("Failed to read image: " + src + ", error: " + e.getMessage());
+                        // Continue to next image or return error? 
+                        // Current logic: ignore failed image
+                    }
+                }
+            }
+            
+            OllamaChatMessage message = new OllamaChatMessage(OllamaChatMessageRole.USER, prompt);
+            message.setImages(images);
+            
+            List<OllamaChatMessage> messages = new ArrayList<>();
+            messages.add(message);
+            
+            OllamaChatRequestBuilder builder = OllamaChatRequestBuilder.getInstance(modelName);
+            builder.withKeepAlive("10m");
+            builder.withMessages(messages);
+
+            builder.withThinking(isThinking);
+
+            if (chatHistroy != null)
+                builder.withMessage(OllamaChatMessageRole.ASSISTANT, chatHistroy);
+            
+            OllamaChatRequest request = builder.build();
+            
+            OllamaChatResult chatResult = ollamaAPI.chat(request);
+            return chatResult.getResponseModel().getMessage().getContent();
+        } catch (Exception e) {
+             System.err.println("Ollama Image Chat Error: " + e.getMessage());
+             e.printStackTrace();
+             return "";
         }
     }
 }
