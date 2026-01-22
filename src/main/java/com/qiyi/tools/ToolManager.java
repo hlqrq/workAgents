@@ -97,7 +97,7 @@ public class ToolManager {
         }
 
         try {
-            System.out.println("Directly executing tool: " + toolName);
+            System.out.println("Directly executing tool (Non-LLM mode): " + toolName);
             ToolRegistry.get(toolName).execute(params, context);
             return true;
         } catch (Exception e) {

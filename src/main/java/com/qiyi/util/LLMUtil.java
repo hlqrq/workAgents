@@ -462,7 +462,18 @@ public class LLMUtil {
      * @return 模型回复
      */
     public static String chatWithOllama(String prompt, String modelName,String chatHistroy,boolean isThinking) {
-        String host = OLLAMA_HOST;
+        return chatWithOllama(prompt, modelName, chatHistroy, isThinking, OLLAMA_HOST);
+    }
+
+    /**
+     * 与本地 Ollama 模型进行简单对话 (指定 Host)
+     * 
+     * @param prompt 提示词
+     * @param modelName 模型名称
+     * @param host Ollama 服务地址 (e.g. http://localhost:11434)
+     * @return 模型回复
+     */
+    public static String chatWithOllama(String prompt, String modelName,String chatHistroy,boolean isThinking, String host) {
         OllamaAPI ollamaAPI = new OllamaAPI(host);
         ollamaAPI.setRequestTimeoutSeconds(120);
         try {
@@ -494,7 +505,20 @@ public class LLMUtil {
      */
     public static OllamaChatResult chatWithOllamaStreaming(String prompt, String modelName,String chatHistroy,boolean isThinking,
                                                                     OllamaStreamHandler thinkHandler,OllamaStreamHandler responseHandler) {
-        String host = OLLAMA_HOST;
+        return chatWithOllamaStreaming(prompt, modelName, chatHistroy, isThinking, thinkHandler, responseHandler, OLLAMA_HOST);
+    }
+
+    /**
+     * 与本地 Ollama 模型进行流式对话 (指定 Host)
+     * 
+     * @param prompt 提示词
+     * @param modelName 模型名称
+     * @param handler 流式处理器
+     * @param host Ollama 服务地址
+     * @return 完整回复
+     */
+    public static OllamaChatResult chatWithOllamaStreaming(String prompt, String modelName,String chatHistroy,boolean isThinking,
+                                                                    OllamaStreamHandler thinkHandler,OllamaStreamHandler responseHandler, String host) {
         OllamaAPI ollamaAPI = new OllamaAPI(host);
         ollamaAPI.setRequestTimeoutSeconds(120);
         try {
@@ -538,15 +562,31 @@ public class LLMUtil {
      * @param imageSources 图片路径列表 (支持本地文件路径或HTTP/HTTPS链接)
      * @return 模型回复
      */
-    public static String chatWithOllamaImage(String prompt, String modelName,String chatHistroy,boolean isThinking, List<String> imageSources) {
-        String host = OLLAMA_HOST;
+    public static OllamaChatResult chatWithOllamaImage(String prompt, String modelName,String chatHistroy,boolean isThinking, List<String> imageSources) {
+        return chatWithOllamaImage(prompt, modelName, chatHistroy, isThinking, imageSources, OLLAMA_HOST);
+    }
+
+    /**
+     * 与本地 Ollama 模型进行带图片对话 (指定 Host)
+     * 
+     * @param prompt 提示词
+     * @param modelName 模型名称 (e.g. qwen3-vl:8b)
+     * @param imageSources 图片路径列表 (支持本地文件路径或HTTP/HTTPS链接)
+     * @param host Ollama 服务地址
+     * @return 模型回复
+     */
+    public static OllamaChatResult chatWithOllamaImage(String prompt, String modelName,String chatHistroy,boolean isThinking, List<String> imageSources, String host) {
         OllamaAPI ollamaAPI = new OllamaAPI(host);
         ollamaAPI.setRequestTimeoutSeconds(120);
-        ollamaAPI.setVerbose(false); // Disable verbose to avoid NPE in library logging if response fields are null
+        //ollamaAPI.setVerbose(false); 
         try {
             List<byte[]> images = new ArrayList<>();
             if (imageSources != null) {
                 for (String src : imageSources) {
+                    if (src == null || src.trim().isEmpty()) {
+                        continue;
+                    }
+                    src = src.trim();
                     try {
                         byte[] imageBytes;
                         if (src.startsWith("http://") || src.startsWith("https://")) {
@@ -582,28 +622,31 @@ public class LLMUtil {
             }
             
             OllamaChatMessage message = new OllamaChatMessage(OllamaChatMessageRole.USER, prompt);
-            message.setImages(images);
+            if (!images.isEmpty()) {
+                message.setImages(images);
+            }
             
             List<OllamaChatMessage> messages = new ArrayList<>();
+            if (chatHistroy != null) {
+                 messages.add(new OllamaChatMessage(OllamaChatMessageRole.ASSISTANT, chatHistroy));
+            }
             messages.add(message);
             
             OllamaChatRequestBuilder builder = OllamaChatRequestBuilder.getInstance(modelName);
             builder.withKeepAlive("10m");
-            builder.withMessages(messages);
+            // builder.withMessages(messages); // Causes empty response, use request.setMessages instead
 
             builder.withThinking(isThinking);
 
-            if (chatHistroy != null)
-                builder.withMessage(OllamaChatMessageRole.ASSISTANT, chatHistroy);
-            
             OllamaChatRequest request = builder.build();
+            request.setMessages(messages);
             
             OllamaChatResult chatResult = ollamaAPI.chat(request);
-            return chatResult.getResponseModel().getMessage().getContent();
+            return chatResult;
         } catch (Exception e) {
              System.err.println("Ollama Image Chat Error: " + e.getMessage());
              e.printStackTrace();
-             return "";
+             return null;
         }
     }
 }

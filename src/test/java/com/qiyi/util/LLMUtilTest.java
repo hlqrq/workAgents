@@ -17,6 +17,7 @@ public class LLMUtilTest {
     private static final String MODEL_NAME = LLMUtil.OLLAMA_MODEL_QWEN3_8B;
     private static final String VL_MODEL_NAME = LLMUtil.OLLAMA_MODEL_QWEN3_VL_8B;
     private static final String VL_MODEL_DEEPSEEK_NAME = LLMUtil.OLLAMA_MODEL_DEEPSEEK_OCR;
+    public static final String OLLAMA_HOST = "http://192.168.3.60:11434";
 
     public static void main(String[] args)
     {
@@ -31,13 +32,13 @@ public class LLMUtilTest {
         System.out.println("=== Testing chatWithOllama ===");
         String prompt = "请你把如下的句子里面提炼出核心的时间，地点，人物，事情：明天小王要去上海参加国际绘画展";
         // Assuming the third argument is chatHistory, passing null or empty string
-        String response = LLMUtil.chatWithOllama(prompt, MODEL_NAME, null,false);
+        String response = LLMUtil.chatWithOllama(prompt, MODEL_NAME, null,false,OLLAMA_HOST);
         System.out.println("Response: " + response);
         if (response.isEmpty()) {
             System.err.println("Response is empty. Make sure Ollama is running and model '" + MODEL_NAME + "' is available.");
         }
 
-        response = LLMUtil.chatWithOllama(prompt, MODEL_NAME, null,true);
+        response = LLMUtil.chatWithOllama(prompt, MODEL_NAME, null,true,OLLAMA_HOST);
         System.out.println("Response: " + response);
         if (response.isEmpty()) {
             System.err.println("Response is empty. Make sure Ollama is running and model '" + MODEL_NAME + "' is available.");
@@ -57,7 +58,7 @@ public class LLMUtilTest {
                 //这个用于逐步输出，如果要一次性获得结果，可以直接使用最后的response里面的完整content
                 contentBuilder.append(s);
             }
-        });
+        },OLLAMA_HOST);
 
         if (response != null) {
             // Wait for completion if async
@@ -90,7 +91,7 @@ public class LLMUtilTest {
                 //这个用于逐步输出，如果要一次性获得结果，可以直接使用最后的response里面的完整content
                 contentBuilder.append(s);
             }
-        });
+        },OLLAMA_HOST);
 
         if (response != null) {
             // Wait for completion if async
@@ -117,26 +118,55 @@ public class LLMUtilTest {
         System.out.println("=== Testing chatWithOllamaImage ===");
         String prompt = "抽取一下信息";
         // Example image URL (Placeholder)
-        String imageUrl = " /Users/cenwenchu/Desktop/2.png";
+        String imageUrl = "/Users/cenwenchu/Desktop/2.png";
         
         List<String> images = Arrays.asList(imageUrl);
         
         // Note: Requires a vision-capable model like qwen3-vl:8b
-        String response = LLMUtil.chatWithOllamaImage(prompt, VL_MODEL_NAME, null, false, images);
-        System.out.println("Response: " + response);
-        if (response.isEmpty()) {
-             System.err.println("Response is empty. Make sure Ollama is running and model '" + VL_MODEL_NAME + "' is available.");
+        OllamaChatResult response = LLMUtil.chatWithOllamaImage(prompt, VL_MODEL_NAME, null, false, images,OLLAMA_HOST);
+        
+         if (response != null) {
+             System.out.println("HTTP Status: " + response.getHttpStatusCode());
+             if (response.getResponseModel() != null) {
+                 System.out.println("Model: " + response.getResponseModel().getModel());
+                 if (response.getResponseModel().getMessage() != null) {
+                    System.out.println("Response Content: " + response.getResponseModel().getMessage().getContent());
+                 } else {
+                    System.err.println("Message is null");
+                 }
+             } else {
+                 System.err.println("ResponseModel is null");
+             }
+        }
+        else
+        {
+             System.err.println("Response object is null. Make sure Ollama is running and model '" + VL_MODEL_NAME + "' is available.");
         }
 
 
-        System.out.println("=== Testing chatWithOllamaImage ===");
+        System.out.println("=== Testing chatWithOllamaImage 2 ===");
         prompt = "抽取一下信息";
 
-        // Note: Requires a vision-capable model like qwen3-vl:8b
-        response = LLMUtil.chatWithOllamaImage(prompt, VL_MODEL_DEEPSEEK_NAME, null, false, images);
-        System.out.println("Response: " + response);
-        if (response.isEmpty()) {
+        
+        response = LLMUtil.chatWithOllamaImage(prompt, VL_MODEL_DEEPSEEK_NAME, null, false, images,OLLAMA_HOST);
+        
+         if (response != null) {
+             System.out.println("HTTP Status: " + response.getHttpStatusCode());
+             if (response.getResponseModel() != null) {
+                  System.out.println("Response Content: " + response.getResponseModel().getMessage().getContent());
+             }
+        }
+        else
+        {
              System.err.println("Response is empty. Make sure Ollama is running and model '" + VL_MODEL_DEEPSEEK_NAME + "' is available.");
         }
+
+        System.out.println("=== Testing chatWithOllamaImage (No Image) ===");
+        prompt = "你是谁？";
+        response = LLMUtil.chatWithOllamaImage(prompt, VL_MODEL_NAME, null, false, null, OLLAMA_HOST);
+        if (response != null && response.getResponseModel() != null) {
+            System.out.println("Response Content: " + response.getResponseModel().getMessage().getContent());
+        }
+
     }
 }
