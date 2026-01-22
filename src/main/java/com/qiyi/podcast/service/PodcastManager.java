@@ -175,17 +175,14 @@ public class PodcastManager {
         executor.shutdown();
         System.out.println("Processing Task Completed.");
         try {
-            DingTalkUtil.sendTextMessageToEmployees(DingTalkUtil.PODCAST_ADMIN_USERS, "播客摘要分析生成完成，处理文件数: " + processedCount);
+            if (context != null) {
+                context.sendText("播客摘要分析生成完成，处理文件数: " + processedCount);
+            } else {
+                DingTalkUtil.sendTextMessageToEmployees(DingTalkUtil.PODCAST_ADMIN_USERS, "播客摘要分析生成完成，处理文件数: " + processedCount);
+            }
         } catch (Exception e) {
             e.printStackTrace();
         }
         
-        if (context != null) {
-            try {
-                context.sendText("播客摘要分析生成完成，处理文件数: " + processedCount);
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
-        }
     }
 }
