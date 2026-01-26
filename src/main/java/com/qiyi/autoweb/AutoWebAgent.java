@@ -351,8 +351,21 @@ public class AutoWebAgent {
         promptArea.setRows(4);
         JScrollPane promptScroll = new JScrollPane(promptArea);
         promptPanel.add(promptScroll, BorderLayout.CENTER);
+
+        JPanel refinePanel = new JPanel(new BorderLayout());
+        refinePanel.setBorder(BorderFactory.createTitledBorder("Refine Hint"));
+        JTextArea refineArea = new JTextArea();
+        refineArea.setLineWrap(true);
+        refineArea.setWrapStyleWord(true);
+        refineArea.setRows(3);
+        JScrollPane refineScroll = new JScrollPane(refineArea);
+        refinePanel.add(refineScroll, BorderLayout.CENTER);
+
+        JPanel promptContainer = new JPanel(new BorderLayout());
+        promptContainer.add(promptPanel, BorderLayout.NORTH);
+        promptContainer.add(refinePanel, BorderLayout.CENTER);
         
-        topContainer.add(promptPanel, BorderLayout.CENTER);
+        topContainer.add(promptContainer, BorderLayout.CENTER);
 
 
         // --- Middle Area: Groovy Code ---
@@ -389,9 +402,12 @@ public class AutoWebAgent {
         // --- Buttons ---
         JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
         JButton btnGetCode = new JButton("Get Code");
+        JButton btnRefine = new JButton("Refine Code");
         JButton btnExecute = new JButton("Execute Code");
+        btnExecute.setEnabled(false);
         
         buttonPanel.add(btnGetCode);
+        buttonPanel.add(btnRefine);
         buttonPanel.add(btnExecute);
         frame.add(buttonPanel, BorderLayout.SOUTH);
 
@@ -438,6 +454,7 @@ public class AutoWebAgent {
             }
 
             btnGetCode.setEnabled(false);
+            btnExecute.setEnabled(false);
             uiLogger.accept("=== Starting Code Generation ===");
             uiLogger.accept("Target Context: " + selectedContext.name);
             codeArea.setText("// Generating code for: " + selectedContext.name + "...\n// Please wait...");
@@ -566,6 +583,7 @@ public class AutoWebAgent {
                     SwingUtilities.invokeLater(() -> {
                         codeArea.setText(code);
                         btnGetCode.setEnabled(true);
+                        btnExecute.setEnabled(true);
                     });
                     uiLogger.accept("Code generated successfully.");
                     
@@ -575,6 +593,73 @@ public class AutoWebAgent {
                         btnGetCode.setEnabled(true);
                     });
                      uiLogger.accept("Error: " + ex.getMessage());
+                }
+            }).start();
+        });
+
+
+        // --- Logic: Refine Code ---
+        btnRefine.addActionListener(e -> {
+            String currentPrompt = promptArea.getText();
+            String refineHint = refineArea.getText();
+            String previousCode = codeArea.getText();
+            String execOutput = outputArea.getText();
+
+            if (previousCode == null || previousCode.trim().isEmpty()) {
+                JOptionPane.showMessageDialog(frame, "No code to refine!", "Error", JOptionPane.ERROR_MESSAGE);
+                return;
+            }
+
+            btnRefine.setEnabled(false);
+            btnExecute.setEnabled(false);
+            uiLogger.accept("=== Refining Code with LLM ===");
+
+            new Thread(() -> {
+                try {
+                    ScanResult res = scanContexts(rootPage);
+                    ContextWrapper workingContext = res.best;
+                    if (workingContext == null && !res.wrappers.isEmpty()) {
+                        workingContext = res.wrappers.get(0);
+                    }
+                    if (workingContext == null) {
+                        workingContext = new ContextWrapper();
+                        workingContext.context = rootPage;
+                        workingContext.name = "Main Page";
+                        uiLogger.accept("Fallback to Main Page context for refine.");
+                    }
+
+                    String freshHtml = "";
+                    try {
+                        freshHtml = getPageContent(workingContext.context);
+                    } catch (Exception contentEx) {
+                        uiLogger.accept("Failed to get page content for refine: " + contentEx.getMessage());
+                    }
+
+                    String freshCleanedHtml = HTMLCleaner.clean(freshHtml);
+                    if (freshCleanedHtml.length() > 100000) {
+                        freshCleanedHtml = freshCleanedHtml.substring(0, 100000) + "...(truncated)";
+                    }
+
+                    String refinedCode = generateRefinedGroovyScript(
+                        currentPrompt,
+                        freshCleanedHtml,
+                        previousCode,
+                        execOutput,
+                        refineHint
+                    );
+
+                    String finalRefinedCode = refinedCode;
+                    SwingUtilities.invokeLater(() -> {
+                        codeArea.setText(finalRefinedCode);
+                        btnRefine.setEnabled(true);
+                        btnExecute.setEnabled(true);
+                    });
+                    uiLogger.accept("Refined code generated successfully.");
+                } catch (Exception ex) {
+                    SwingUtilities.invokeLater(() -> {
+                        btnRefine.setEnabled(true);
+                    });
+                    uiLogger.accept("Refine failed: " + ex.getMessage());
                 }
             }).start();
         });
@@ -732,6 +817,46 @@ public class AutoWebAgent {
         String code = LLMUtil.chatWithDeepSeek(prompt);
         
         // Clean up code block markers if present
+        if (code != null) {
+            code = code.replaceAll("```groovy", "").replaceAll("```java", "").replaceAll("```", "").trim();
+        }
+        return code;
+    }
+
+    private static String generateRefinedGroovyScript(
+        String originalUserPrompt,
+        String cleanedHtml,
+        String previousCode,
+        String execOutput,
+        String refineHint
+    ) {
+        String prompt = String.format(
+            "You previously generated Groovy Playwright automation code for the following task.\n" +
+            "Original User Task:\n%s\n\n" +
+            "Cleaned HTML snapshot of the current page/frame:\n%s\n\n" +
+            "Previous Groovy Code:\n%s\n\n" +
+            "Execution Output / Error Log:\n%s\n\n" +
+            "Additional User Hint For Fixing The Code:\n%s\n\n" +
+            "CRITICAL FIX REQUIREMENTS:\n" +
+            "- If an element is reported as missing, FIRST verify its existence and visibility in the provided HTML.\n" +
+            "- DO NOT guess selectors or framework prefixes (ant-, art-, el-) if the element is not present in the HTML.\n" +
+            "- Check for hidden elements (bounding box width/height > 0) before using selectors.\n" +
+            "Your goal is to FIX and IMPROVE the Groovy code based on the execution result and the new hint.\n" +
+            "Requirements:\n" +
+            "- Preserve the overall intent of the original task and code.\n" +
+            "- Use the HTML structure above to ground all selectors.\n" +
+            "- Apply the same GLOBAL PRINCIPLES as before: avoid guessing framework prefixes, prefer tbody tr for standard tables, use locator('...').first() in strict mode, and do not use page.waitForLoadState(\"networkidle\").\n" +
+            "- Avoid redefining variables with the same name in the same scope.\n" +
+            "- Output ONLY the final Groovy code, no explanations.\n",
+            originalUserPrompt,
+            cleanedHtml,
+            previousCode,
+            execOutput,
+            refineHint
+        );
+
+        System.out.println("Refining code with LLM...");
+        String code = LLMUtil.chatWithDeepSeek(prompt);
         if (code != null) {
             code = code.replaceAll("```groovy", "").replaceAll("```java", "").replaceAll("```", "").trim();
         }
