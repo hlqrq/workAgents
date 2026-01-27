@@ -22,8 +22,13 @@ CRITICAL FIX REQUIREMENTS:
 - **Variable Rule**: Do NOT redeclare variables.
 - **No Translation**: Do NOT translate keywords from the User Task or Hint. Use them exactly as provided.
 - **Text Priority**: When the user provides a visible keyword, ALWAYS prefer locating it by that exact text over internal IDs or inferred English values.
-- **Hidden Inputs**: In modern UI frameworks, `input` elements are often hidden. Do NOT use `check()` on `input`. Instead, `click()` the parent `label` or visible text.
+- **Hidden Inputs**: In modern UI frameworks (like Ant Design), `input` elements are often hidden (e.g. `display:none` or `opacity:0`). 
+  - **CRITICAL**: Do NOT click/check the `input` element itself, as it will cause a timeout.
+  - **SOLUTION**: Click the visible PARENT or SIBLING element (usually a `<label>`, `<span>`, or `<div>`).
+  - Example: Instead of `web.click('input[type="checkbox"]')`, use `web.click('label:has(input[type="checkbox"])')` or just `web.click('text="Visible Label"')`.
  - For table operations, PREFER per-row CSS selectors with `:nth-child()` (e.g., `".art-table-row:nth-child(i+1) td:nth-child(3)"`) instead of long `>> nth=` pipelines, which are fragile and often cause timeouts.
+ - **Virtual Scrolling Fix**: Use "Extract-While-Scrolling" strategy. Initialize a `Set` for unique IDs. In a loop (20x), extract current visible rows (add to Set if unique), then `web.mouseWheel(target, 600)`. This handles row unmounting.
+ - **Interaction Fix**: If you need to click a specific row (e.g. first row) AFTER extraction, you MUST `web.scrollToTop(target)` and wait before clicking.
 
 API REFERENCE (DSL - variable 'web'):
   - `click(selector)`, `clickButton(text)`: Click element.
@@ -38,7 +43,11 @@ API REFERENCE (DSL - variable 'web'):
   - `wait(millis)`: Pause execution.
   - `hover(selector)`: Hover mouse over element.
   - `scrollIntoView(selector)`: Scroll to element.
+  - `mouseWheel(selector, deltaY)`: Hover over selector and scroll wheel (robust for virtual lists).
   - `press(selector, key)`: Press keyboard key (e.g. 'Enter') on element.
+  - `scrollToBottom()`, `scrollToBottom(selector)`: Scroll window or element to bottom.
+  - `scrollToTop(selector)`: Scroll element to top.
+  - `scrollBy(selector, amount)`: Scroll element by amount pixels (e.g. 500).
   - `log(msg)`: Log message.
   - `findRowIndex(rowSelector, cellText)`: Find row index containing text.
 - PREFER these DSL methods over raw Playwright calls.

@@ -59,7 +59,8 @@ public class LLMUtil {
         GEMINI,
         ALIYUN,
         ALIYUN_VL,
-        OLLAMA // Added Ollama support
+        OLLAMA, // Added Ollama support
+        MINIMAX
     }
 
     public static final String OLLAMA_HOST = "http://localhost:11434";
@@ -84,7 +85,7 @@ public class LLMUtil {
                     .build();
             
             GenerationParam param = GenerationParam.builder()
-                    .model("qwen-max") // 使用通义千问-Max
+                    .model("qwen3-max") // 使用通义千问-Max
                     .messages(Arrays.asList(userMsg))
                     .resultFormat(GenerationParam.ResultFormat.MESSAGE)
                     .apiKey(AppConfig.getInstance().getAliyunApiKey())
@@ -643,5 +644,62 @@ public class LLMUtil {
              e.printStackTrace();
              return null;
         }
+    }
+
+    // --- Minimax ---
+
+    public static String chatWithMinimax(String prompt) {
+        String apiKey = AppConfig.getInstance().getMinimaxApiKey();
+        if (apiKey == null || apiKey.trim().isEmpty()) {
+            System.err.println("Minimax API Key is missing!");
+            return "";
+        }
+
+        try {
+            java.util.Map<String, Object> message = new java.util.HashMap<>();
+            message.put("role", "user");
+            message.put("content", prompt);
+
+            java.util.Map<String, Object> payload = new java.util.HashMap<>();
+            payload.put("model", "MiniMax-M2.1");
+            payload.put("messages", java.util.List.of(message));
+            payload.put("stream", false);
+
+            java.util.Map<String, Object> extraBody = new java.util.HashMap<>();
+            extraBody.put("reasoning_split", Boolean.TRUE);
+            payload.put("extra_body", extraBody);
+
+            String jsonBody = com.alibaba.fastjson2.JSON.toJSONString(payload);
+
+            java.net.http.HttpClient client = java.net.http.HttpClient.newHttpClient();
+            java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
+                    .uri(java.net.URI.create("https://api.minimaxi.com/v1/chat/completions"))
+                    .header("Content-Type", "application/json")
+                    .header("Authorization", "Bearer " + apiKey)
+                    .POST(java.net.http.HttpRequest.BodyPublishers.ofString(jsonBody))
+                    .build();
+
+            java.net.http.HttpResponse<String> response = client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+
+            if (response.statusCode() == 200) {
+                com.alibaba.fastjson2.JSONObject jsonResponse = com.alibaba.fastjson2.JSON.parseObject(response.body());
+                if (jsonResponse.containsKey("choices")) {
+                    String content = jsonResponse.getJSONArray("choices")
+                            .getJSONObject(0)
+                            .getJSONObject("message")
+                            .getString("content");
+                    if (content != null) {
+                        content = content.replaceAll("(?s)<think>.*?</think>", "").trim();
+                    }
+                    return content;
+                }
+            } else {
+                System.err.println("Minimax API Error: " + response.statusCode() + " - " + response.body());
+            }
+        } catch (Exception e) {
+            System.err.println("Minimax Chat Exception: " + e.getMessage());
+            e.printStackTrace();
+        }
+        return "";
     }
 }

@@ -14,8 +14,10 @@ public class AutoWebAgent {
 
     private static String GROOVY_SCRIPT_PROMPT_TEMPLATE = "";
     private static String REFINED_GROOVY_SCRIPT_PROMPT_TEMPLATE = "";
+    private static String ACTIVE_MODEL = "DEEPSEEK";
 
     public static void main(String[] args) {
+
         loadPrompts();
         if (args.length < 2) {
             // Default example if no args provided
@@ -29,6 +31,32 @@ public class AutoWebAgent {
             System.out.println("Prompt: " + userPrompt);
             run(url, userPrompt);
         } else {
+            if (args.length >= 3 && args[2] != null) {
+                String modelArg = args[2].trim();
+                String upper = modelArg.toUpperCase();
+                if ("DEEPSEEK".equals(upper)) {
+                    ACTIVE_MODEL = "DEEPSEEK";
+                    System.out.println("Using model: DeepSeek (remote)");
+                } else if ("QWEN-MAX".equals(upper) || "QWEN_MAX".equals(upper) || "ALIYUN_QWEN_MAX".equals(upper)) {
+                    ACTIVE_MODEL = "QWEN_MAX";
+                    System.out.println("Using model: Aliyun Qwen-Max (remote)");
+                } else if ("GEMINI".equals(upper) || "GEMINI_FLASH".equals(upper)) {
+                    ACTIVE_MODEL = "GEMINI";
+                    System.out.println("Using model: Gemini (remote)");
+                } else if ("OLLAMA_MODEL_QWEN3_8B".equals(upper)
+                        || "OLLAMA_QWEN3_8B".equals(upper)
+                        || "OLLAMA".equals(upper)
+                        || "QWEN3_8B".equals(upper)
+                        || "QWEN3:8B".equals(upper)) {
+                    ACTIVE_MODEL = "OLLAMA_QWEN3_8B";
+                    System.out.println("Using local Ollama model: " + LLMUtil.OLLAMA_MODEL_QWEN3_8B + " @ " + LLMUtil.OLLAMA_HOST);
+                } else {
+                    ACTIVE_MODEL = "DEEPSEEK";
+                    System.out.println("Unknown model arg '" + modelArg + "', defaulting to DeepSeek.");
+                }
+            } else {
+                ACTIVE_MODEL = "DEEPSEEK";
+            }
             run(args[0], args[1]);
         }
     }
@@ -460,30 +488,83 @@ public class AutoWebAgent {
             }
         });
 
+        // --- Action Buttons (Declared early for layout) ---
+        JButton btnGetCode = new JButton("生成代码");
+        JButton btnRefine = new JButton("修正代码");
+        JButton btnExecute = new JButton("执行代码");
+        btnExecute.setEnabled(false);
+
         // --- Top Area: Settings + Prompt ---
         JPanel topContainer = new JPanel(new BorderLayout());
 
-        // 1. Settings Panel (Context Selector)
-        JPanel settingsPanel = new JPanel(new BorderLayout());
-        settingsPanel.setBorder(BorderFactory.createTitledBorder("上下文选择"));
+        // 1. Settings Area (Context + Model + Buttons)
+        JPanel settingsArea = new JPanel();
+        settingsArea.setLayout(new BoxLayout(settingsArea, BoxLayout.Y_AXIS));
+        settingsArea.setBorder(BorderFactory.createTitledBorder("控制面板"));
+
+        // Row 1: Context & Model Selection
+        JPanel selectionPanel = new JPanel(new BorderLayout());
         
         JPanel leftSettings = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 0));
         JLabel lblContext = new JLabel("目标上下文:");
         JComboBox<ContextWrapper> contextCombo = new JComboBox<>();
-        contextCombo.setPreferredSize(new Dimension(250, 25));
+        contextCombo.setPreferredSize(new Dimension(220, 25));
+        JLabel lblModel = new JLabel("大模型:");
+        JComboBox<String> modelCombo = new JComboBox<>();
+        modelCombo.addItem("DeepSeek");
+        modelCombo.addItem("Qwen-Max");
+        modelCombo.addItem("Minimax");
+        modelCombo.addItem("Gemini");
+        modelCombo.addItem("Ollama Qwen3:8B");
+        if ("QWEN_MAX".equals(ACTIVE_MODEL)) {
+            modelCombo.setSelectedItem("Qwen-Max");
+        } else if ("GEMINI".equals(ACTIVE_MODEL)) {
+            modelCombo.setSelectedItem("Gemini");
+        } else if ("OLLAMA_QWEN3_8B".equals(ACTIVE_MODEL)) {
+            modelCombo.setSelectedItem("Ollama Qwen3:8B");
+        } else if ("MINIMAX".equals(ACTIVE_MODEL)) {
+            modelCombo.setSelectedItem("Minimax");
+        } else {
+            modelCombo.setSelectedItem("DeepSeek");
+        }
+        modelCombo.addActionListener(e -> {
+            String selected = (String) modelCombo.getSelectedItem();
+            if ("Qwen-Max".equals(selected)) {
+                ACTIVE_MODEL = "QWEN_MAX";
+            } else if ("Gemini".equals(selected)) {
+                ACTIVE_MODEL = "GEMINI";
+            } else if ("Ollama Qwen3:8B".equals(selected)) {
+                ACTIVE_MODEL = "OLLAMA_QWEN3_8B";
+            } else if ("Minimax".equals(selected)) {
+                ACTIVE_MODEL = "MINIMAX";
+            } else {
+                ACTIVE_MODEL = "DEEPSEEK";
+            }
+        });
         leftSettings.add(lblContext);
         leftSettings.add(contextCombo);
+        leftSettings.add(lblModel);
+        leftSettings.add(modelCombo);
         
         JPanel rightSettings = new JPanel(new FlowLayout(FlowLayout.RIGHT, 5, 0));
-        JButton btnRefreshContext = new JButton("刷新 / 扫描");
+        JButton btnRefreshContext = new JButton("刷新");
         JButton btnReloadPrompts = new JButton("重载提示规则");
         rightSettings.add(btnRefreshContext);
         rightSettings.add(btnReloadPrompts);
         
-        settingsPanel.add(leftSettings, BorderLayout.WEST);
-        settingsPanel.add(rightSettings, BorderLayout.EAST);
+        selectionPanel.add(leftSettings, BorderLayout.WEST);
+        selectionPanel.add(rightSettings, BorderLayout.EAST);
         
-        topContainer.add(settingsPanel, BorderLayout.NORTH);
+        // Row 2: Operation Buttons
+        JPanel actionPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 5));
+        actionPanel.add(btnGetCode);
+        actionPanel.add(btnRefine);
+        actionPanel.add(btnExecute);
+
+        settingsArea.add(selectionPanel);
+        settingsArea.add(actionPanel);
+        
+        topContainer.add(settingsArea, BorderLayout.NORTH);
 
         // 2. Prompt Panel
         JPanel promptPanel = new JPanel(new BorderLayout());
@@ -540,20 +621,6 @@ public class AutoWebAgent {
         mainSplit.setResizeWeight(0.25);
         
         frame.add(mainSplit, BorderLayout.CENTER);
-
-
-        // --- Buttons ---
-        JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
-        JButton btnGetCode = new JButton("生成代码");
-        JButton btnRefine = new JButton("修正代码");
-        JButton btnExecute = new JButton("执行代码");
-        btnExecute.setEnabled(false);
-        
-        buttonPanel.add(btnGetCode);
-        buttonPanel.add(btnRefine);
-        buttonPanel.add(btnExecute);
-        frame.add(buttonPanel, BorderLayout.SOUTH);
-
 
         // --- Helper: UI Logger ---
         java.util.function.Consumer<String> uiLogger = (msg) -> {
@@ -838,6 +905,66 @@ public class AutoWebAgent {
         new Thread(refreshContextAction).start();
     }
 
+    private static String callLLMWithTimeout(java.util.concurrent.Callable<String> task, long timeoutMillis, java.util.function.Consumer<String> uiLogger, String modelName) {
+        java.util.concurrent.ExecutorService executor = java.util.concurrent.Executors.newSingleThreadExecutor();
+        java.util.concurrent.Future<String> future = executor.submit(task);
+        try {
+            return future.get(timeoutMillis, java.util.concurrent.TimeUnit.MILLISECONDS);
+        } catch (java.util.concurrent.TimeoutException te) {
+            future.cancel(true);
+            if (uiLogger != null) {
+                uiLogger.accept("LLM 调用超时，模型: " + modelName + "，已中止本次请求。");
+            }
+        } catch (Exception ex) {
+            future.cancel(true);
+            if (uiLogger != null) {
+                uiLogger.accept("LLM 调用失败，模型: " + modelName + "，错误: " + ex.getMessage());
+            }
+        } finally {
+            executor.shutdownNow();
+        }
+        return "";
+    }
+
+    private static String callActiveModel(String prompt, java.util.function.Consumer<String> uiLogger) {
+        System.out.println("Calling LLM (model=" + ACTIVE_MODEL + ")...");
+        String code = "";
+        switch (ACTIVE_MODEL) {
+            case "QWEN_MAX":
+                code = LLMUtil.chatWithAliyun(prompt);
+                break;
+            case "MINIMAX":
+                code = callLLMWithTimeout(() -> LLMUtil.chatWithMinimax(prompt), 180000L, uiLogger, "Minimax");
+                if (code == null || code.trim().isEmpty()) {
+                    if (uiLogger != null) {
+                        uiLogger.accept("Minimax 调用未返回结果或发生错误。");
+                    }
+                }
+                break;
+            case "GEMINI":
+                code = callLLMWithTimeout(() -> LLMUtil.chatWithGemini(prompt), 180000L, uiLogger, "Gemini");
+                if (code == null || code.trim().isEmpty()) {
+                    if (uiLogger != null) {
+                        uiLogger.accept("Gemini 调用未返回结果或发生错误。");
+                    }
+                }
+                break;
+            case "OLLAMA_QWEN3_8B":
+                code = LLMUtil.chatWithOllama(prompt, LLMUtil.OLLAMA_MODEL_QWEN3_8B, null, false);
+                break;
+            case "DEEPSEEK":
+            default:
+                code = LLMUtil.chatWithDeepSeek(prompt);
+                break;
+        }
+        
+        // Clean up code block markers if present
+        if (code != null) {
+            code = code.replaceAll("```groovy", "").replaceAll("```java", "").replaceAll("```", "").trim();
+        }
+        return code;
+    }
+
     private static String generateGroovyScript(String userPrompt, String cleanedHtml, java.util.function.Consumer<String> uiLogger) {
         if (GROOVY_SCRIPT_PROMPT_TEMPLATE == null || GROOVY_SCRIPT_PROMPT_TEMPLATE.isEmpty()) {
             loadPrompts();
@@ -849,14 +976,7 @@ public class AutoWebAgent {
             uiLogger.accept("Prompt Context Length (Get Code): " + prompt.length() + " chars");
         }
 
-        System.out.println("Generating code with LLM...");
-        String code = LLMUtil.chatWithDeepSeek(prompt);
-        
-        // Clean up code block markers if present
-        if (code != null) {
-            code = code.replaceAll("```groovy", "").replaceAll("```java", "").replaceAll("```", "").trim();
-        }
-        return code;
+        return callActiveModel(prompt, uiLogger);
     }
 
     private static String generateRefinedGroovyScript(
@@ -884,12 +1004,7 @@ public class AutoWebAgent {
             uiLogger.accept("Prompt Context Length (Refine Code): " + prompt.length() + " chars");
         }
 
-        System.out.println("Refining code with LLM...");
-        String code = LLMUtil.chatWithDeepSeek(prompt);
-        if (code != null) {
-            code = code.replaceAll("```groovy", "").replaceAll("```java", "").replaceAll("```", "").trim();
-        }
-        return code;
+        return callActiveModel(prompt, uiLogger);
     }
 
     private static void executeWithGroovy(String scriptCode, Object pageOrFrame, java.util.function.Consumer<String> logger) throws Exception {

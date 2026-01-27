@@ -147,6 +147,60 @@ public class WebDSL {
         locator(selector).first().scrollIntoViewIfNeeded();
     }
 
+    /**
+     * Scrolls the window to the bottom.
+     */
+    public void scrollToBottom() {
+        log("Action: Scroll window to bottom");
+        page.evaluate("window.scrollTo(0, document.body.scrollHeight)");
+    }
+
+    /**
+     * Scrolls a specific container to its bottom (useful for virtual tables).
+     */
+    public void scrollToBottom(String selector) {
+        log("Action: Scroll '" + selector + "' to bottom");
+        highlight(selector);
+        locator(selector).first().evaluate("el => { el.scrollTop = el.scrollHeight; el.dispatchEvent(new Event('scroll', { bubbles: true })); }");
+    }
+
+    /**
+     * Scrolls a specific container to its top (useful for virtual tables).
+     */
+    public void scrollToTop(String selector) {
+        log("Action: Scroll '" + selector + "' to top");
+        highlight(selector);
+        locator(selector).first().evaluate("el => { el.scrollTop = 0; el.dispatchEvent(new Event('scroll', { bubbles: true })); }");
+    }
+
+    /**
+     * Scrolls a container by a specific amount (useful for incremental loading).
+     * Triggers a 'scroll' event to ensure virtual lists detect the change.
+     */
+    public void scrollBy(String selector, int amount) {
+        log("Action: Scroll '" + selector + "' by " + amount + "px");
+        highlight(selector);
+        locator(selector).first().evaluate("el => { el.scrollTop += " + amount + "; el.dispatchEvent(new Event('scroll', { bubbles: true })); }");
+    }
+
+    /**
+     * Simulates a mouse wheel scroll.
+     * Useful for virtual lists that listen to wheel events instead of scroll events.
+     */
+    public void mouseWheel(int deltaX, int deltaY) {
+        log("Action: Mouse Wheel x=" + deltaX + ", y=" + deltaY);
+        page.mouse().wheel(deltaX, deltaY);
+    }
+
+    /**
+     * Hovers over an element and scrolls with the mouse wheel.
+     */
+    public void mouseWheel(String selector, int deltaY) {
+        log("Action: Mouse Wheel over '" + selector + "' by " + deltaY);
+        hover(selector);
+        page.mouse().wheel(0, deltaY);
+    }
+
     // --- Visual Feedback ---
     
     private void highlight(String selector) {
