@@ -12,7 +12,8 @@ public class AutoWebAgent {
         if (args.length < 2) {
             // Default example if no args provided
             String url = "https://sc.scm121.com/tradeManage/tower/distribute";
-            String userPrompt = "查询待发货的订单，然后会得到的结果表带有表头'序号','订单号','商品信息'等字段，选中其中的第一条结果";
+            String userPrompt = "查询待发货的订单，然后会得到的结果表带有表头'序号','订单号','商品信息'等字段，选中其中的第一条结果，"
+                            +"并且把第一条的记录所有字段的值都提取出来输出，然后再查看一下当前的结果有多少记录，输出记录数";
             System.out.println("No arguments provided. Running default example:");
             System.out.println("URL: " + url);
             System.out.println("Prompt: " + userPrompt);
@@ -290,6 +291,92 @@ public class AutoWebAgent {
         return result;
     }
 
+    // Helper method to reload page and find context (Shared by Get Code and Refine Code)
+    private static ContextWrapper reloadAndFindContext(
+            Page rootPage, 
+            ContextWrapper selectedContext, 
+            java.util.function.Consumer<String> uiLogger,
+            JComboBox<ContextWrapper> contextCombo
+    ) {
+        // 0. Reload Page to clean state (Always reload the main page to ensure clean state)
+        uiLogger.accept("Reloading page to ensure clean state...");
+        // Just reload the root page always, it's safer and "simpler"
+        try {
+            rootPage.reload(); 
+            // Use NETWORKIDLE to ensure most resources are loaded
+            rootPage.waitForLoadState(com.microsoft.playwright.options.LoadState.NETWORKIDLE);
+        } catch (Exception reloadEx) {
+             uiLogger.accept("Warning during reload: " + reloadEx.getMessage());
+        }
+        
+        // Wait a bit for dynamic content after reload
+        try { Thread.sleep(5000); } catch (InterruptedException ie) {}
+
+        // 0.5 Re-scan to find the fresh context (Simulate "Opening new page")
+        uiLogger.accept("Scanning for frames after reload...");
+        ScanResult res = scanContexts(rootPage);
+        
+        // Retry scanning if only Main Page is found or best is Main Page, up to 30 times (30 seconds)
+        // This is crucial because frames might load slower than the main page DOM
+        int scanRetries = 0;
+        String targetFrameName = (selectedContext != null && selectedContext.name != null && selectedContext.name.startsWith("Frame:")) ? selectedContext.name : null;
+        
+        while (scanRetries < 30) {
+            // Success condition 1: We found a valid best context that is NOT Main Page
+            if (res.best != null && !"Main Page".equals(res.best.name)) {
+                 // If we were looking for a specific frame, check if we found it (loose match)
+                 if (targetFrameName != null) {
+                     boolean foundTarget = false;
+                     for (ContextWrapper cw : res.wrappers) {
+                         if (cw.name.equals(targetFrameName)) {
+                             res.best = cw; // Force select the same frame
+                             foundTarget = true;
+                             break;
+                         }
+                     }
+                     if (foundTarget) break; // Found our specific frame!
+                 } else {
+                     break; // Found some frame, good enough
+                 }
+            }
+            
+            try { Thread.sleep(1000); } catch (InterruptedException ie) {}
+            // Only log every 5 retries to avoid spamming
+            if (scanRetries % 5 == 0) {
+                uiLogger.accept("Retrying frame scan (" + (scanRetries + 1) + "/30)...");
+            }
+            res = scanContexts(rootPage);
+            scanRetries++;
+        }
+        
+        // Update UI with new contexts
+        ScanResult finalRes = res;
+        SwingUtilities.invokeLater(() -> {
+            contextCombo.removeAllItems();
+            for (ContextWrapper w : finalRes.wrappers) {
+                contextCombo.addItem(w);
+            }
+            if (finalRes.best != null) {
+                contextCombo.setSelectedItem(finalRes.best);
+            }
+        });
+        
+        // Use the new best context for code generation
+        ContextWrapper workingContext;
+        if (res.best != null) {
+            workingContext = res.best;
+            uiLogger.accept("已自动选中最佳上下文: " + workingContext.name);
+        } else {
+            // Fallback to main page if something weird happens
+            workingContext = new ContextWrapper();
+            workingContext.context = rootPage;
+            workingContext.name = "主页面";
+            uiLogger.accept("未能找到合适的上下文，回退使用主页面。");
+        }
+        
+        return workingContext;
+    }
+
     private static String getPageContent(Object pageOrFrame) {
         if (pageOrFrame instanceof Page) {
             return ((Page) pageOrFrame).content();
@@ -308,7 +395,7 @@ public class AutoWebAgent {
             rootPage = (Page) initialContext;
         }
 
-        JFrame frame = new JFrame("AutoWeb Agent Controller");
+        JFrame frame = new JFrame("AutoWeb 网页自动化控制台");
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         frame.setSize(600, 950);
         frame.setLayout(new BorderLayout());
@@ -319,7 +406,7 @@ public class AutoWebAgent {
             public void windowClosing(java.awt.event.WindowEvent windowEvent) {
                 if (connection != null && connection.playwright != null) {
                     connection.playwright.close();
-                    System.out.println("Playwright connection closed.");
+                    System.out.println("Playwright 连接已关闭。");
                 }
             }
         });
@@ -329,12 +416,12 @@ public class AutoWebAgent {
 
         // 1. Settings Panel (Context Selector)
         JPanel settingsPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
-        settingsPanel.setBorder(BorderFactory.createTitledBorder("Context Selection"));
+        settingsPanel.setBorder(BorderFactory.createTitledBorder("上下文选择"));
         
-        JLabel lblContext = new JLabel("Target:");
+        JLabel lblContext = new JLabel("目标上下文:");
         JComboBox<ContextWrapper> contextCombo = new JComboBox<>();
         contextCombo.setPreferredSize(new Dimension(300, 25));
-        JButton btnRefreshContext = new JButton("Refresh / Scan");
+        JButton btnRefreshContext = new JButton("刷新 / 扫描");
         
         settingsPanel.add(lblContext);
         settingsPanel.add(contextCombo);
@@ -344,7 +431,7 @@ public class AutoWebAgent {
 
         // 2. Prompt Panel
         JPanel promptPanel = new JPanel(new BorderLayout());
-        promptPanel.setBorder(BorderFactory.createTitledBorder("User Prompt"));
+        promptPanel.setBorder(BorderFactory.createTitledBorder("用户命令"));
         JTextArea promptArea = new JTextArea(defaultPrompt);
         promptArea.setLineWrap(true);
         promptArea.setWrapStyleWord(true);
@@ -353,7 +440,7 @@ public class AutoWebAgent {
         promptPanel.add(promptScroll, BorderLayout.CENTER);
 
         JPanel refinePanel = new JPanel(new BorderLayout());
-        refinePanel.setBorder(BorderFactory.createTitledBorder("Refine Hint"));
+        refinePanel.setBorder(BorderFactory.createTitledBorder("Refine 修正提示"));
         JTextArea refineArea = new JTextArea();
         refineArea.setLineWrap(true);
         refineArea.setWrapStyleWord(true);
@@ -370,7 +457,7 @@ public class AutoWebAgent {
 
         // --- Middle Area: Groovy Code ---
         JPanel codePanel = new JPanel(new BorderLayout());
-        codePanel.setBorder(BorderFactory.createTitledBorder("Groovy Code"));
+        codePanel.setBorder(BorderFactory.createTitledBorder("Groovy 代码"));
         JTextArea codeArea = new JTextArea();
         codeArea.setFont(new Font("Monospaced", Font.PLAIN, 12));
         JScrollPane codeScroll = new JScrollPane(codeArea);
@@ -379,7 +466,7 @@ public class AutoWebAgent {
 
         // --- Bottom Area: Output Log ---
         JPanel outputPanel = new JPanel(new BorderLayout());
-        outputPanel.setBorder(BorderFactory.createTitledBorder("Execution Output"));
+        outputPanel.setBorder(BorderFactory.createTitledBorder("执行日志"));
         JTextArea outputArea = new JTextArea();
         outputArea.setFont(new Font("Monospaced", Font.PLAIN, 12));
         outputArea.setEditable(false);
@@ -401,9 +488,9 @@ public class AutoWebAgent {
 
         // --- Buttons ---
         JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
-        JButton btnGetCode = new JButton("Get Code");
-        JButton btnRefine = new JButton("Refine Code");
-        JButton btnExecute = new JButton("Execute Code");
+        JButton btnGetCode = new JButton("生成代码");
+        JButton btnRefine = new JButton("修正代码");
+        JButton btnExecute = new JButton("执行代码");
         btnExecute.setEnabled(false);
         
         buttonPanel.add(btnGetCode);
@@ -423,7 +510,7 @@ public class AutoWebAgent {
         
         // --- Logic: Refresh Contexts ---
         Runnable refreshContextAction = () -> {
-            uiLogger.accept("Scanning for frames...");
+            uiLogger.accept("正在扫描可用的页面和 iframe...");
             ScanResult res = scanContexts(rootPage);
             
             SwingUtilities.invokeLater(() -> {
@@ -434,7 +521,7 @@ public class AutoWebAgent {
                 if (res.best != null) {
                     contextCombo.setSelectedItem(res.best);
                 }
-                uiLogger.accept("Context list updated. Auto-selected: " + (res.best != null ? res.best.name : "None"));
+                uiLogger.accept("上下文列表已更新，自动选择: " + (res.best != null ? res.best.name : "无"));
             });
         };
 
@@ -448,95 +535,27 @@ public class AutoWebAgent {
             String currentPrompt = promptArea.getText();
             ContextWrapper selectedContext = (ContextWrapper) contextCombo.getSelectedItem();
             
+            if (currentPrompt == null || currentPrompt.trim().isEmpty()) {
+                JOptionPane.showMessageDialog(frame, "请先在用户命令输入框中填写要执行的指令。", "提示", JOptionPane.INFORMATION_MESSAGE);
+                return;
+            }
             if (selectedContext == null) {
-                JOptionPane.showMessageDialog(frame, "Please select a context first.", "Error", JOptionPane.ERROR_MESSAGE);
+                JOptionPane.showMessageDialog(frame, "请先选择一个目标上下文（Frame/Page）。", "错误", JOptionPane.ERROR_MESSAGE);
                 return;
             }
 
             btnGetCode.setEnabled(false);
+            btnRefine.setEnabled(false);
             btnExecute.setEnabled(false);
-            uiLogger.accept("=== Starting Code Generation ===");
-            uiLogger.accept("Target Context: " + selectedContext.name);
-            codeArea.setText("// Generating code for: " + selectedContext.name + "...\n// Please wait...");
+            outputArea.setText(""); // Clear output before new operation
+            uiLogger.accept("=== 开始生成代码 ===");
+            uiLogger.accept("目标上下文: " + selectedContext.name);
+            codeArea.setText("// 正在为上下文生成代码: " + selectedContext.name + "...\n// 请稍候...");
             
             new Thread(() -> {
                 try {
-                    ContextWrapper workingContext = selectedContext;
-
-                    // 0. Reload Page to clean state (Always reload the main page to ensure clean state)
-                    uiLogger.accept("Reloading page to ensure clean state...");
-                    // Just reload the root page always, it's safer and "simpler"
-                    try {
-                        rootPage.reload(); 
-                        // Use NETWORKIDLE to ensure most resources are loaded
-                        rootPage.waitForLoadState(com.microsoft.playwright.options.LoadState.NETWORKIDLE);
-                    } catch (Exception reloadEx) {
-                         uiLogger.accept("Warning during reload: " + reloadEx.getMessage());
-                    }
-                    
-                    // Wait a bit for dynamic content after reload
-                    try { Thread.sleep(5000); } catch (InterruptedException ie) {}
-
-                    // 0.5 Re-scan to find the fresh context (Simulate "Opening new page")
-                    uiLogger.accept("Scanning for frames after reload...");
-                    ScanResult res = scanContexts(rootPage);
-                    
-                    // Retry scanning if only Main Page is found or best is Main Page, up to 30 times (30 seconds)
-                    // This is crucial because frames might load slower than the main page DOM
-                    int scanRetries = 0;
-                    String targetFrameName = (selectedContext != null && selectedContext.name != null && selectedContext.name.startsWith("Frame:")) ? selectedContext.name : null;
-                    
-                    while (scanRetries < 30) {
-                        // Success condition 1: We found a valid best context that is NOT Main Page
-                        if (res.best != null && !"Main Page".equals(res.best.name)) {
-                             // If we were looking for a specific frame, check if we found it (loose match)
-                             if (targetFrameName != null) {
-                                 boolean foundTarget = false;
-                                 for (ContextWrapper cw : res.wrappers) {
-                                     if (cw.name.equals(targetFrameName)) {
-                                         res.best = cw; // Force select the same frame
-                                         foundTarget = true;
-                                         break;
-                                     }
-                                 }
-                                 if (foundTarget) break; // Found our specific frame!
-                             } else {
-                                 break; // Found some frame, good enough
-                             }
-                        }
-                        
-                        try { Thread.sleep(1000); } catch (InterruptedException ie) {}
-                        // Only log every 5 retries to avoid spamming
-                        if (scanRetries % 5 == 0) {
-                            uiLogger.accept("Retrying frame scan (" + (scanRetries + 1) + "/30)...");
-                        }
-                        res = scanContexts(rootPage);
-                        scanRetries++;
-                    }
-                    
-                    // Update UI with new contexts
-                    ScanResult finalRes = res;
-                    SwingUtilities.invokeLater(() -> {
-                        contextCombo.removeAllItems();
-                        for (ContextWrapper w : finalRes.wrappers) {
-                            contextCombo.addItem(w);
-                        }
-                        if (finalRes.best != null) {
-                            contextCombo.setSelectedItem(finalRes.best);
-                        }
-                    });
-                    
-                    // Use the new best context for code generation
-                    if (res.best != null) {
-                        workingContext = res.best;
-                        uiLogger.accept("Auto-selected best context: " + workingContext.name);
-                    } else {
-                        // Fallback to main page if something weird happens
-                        workingContext = new ContextWrapper();
-                        workingContext.context = rootPage;
-                        workingContext.name = "Main Page";
-                        uiLogger.accept("Fallback to Main Page context.");
-                    }
+                    // Use helper to reload and find context
+                    ContextWrapper workingContext = reloadAndFindContext(rootPage, selectedContext, uiLogger, contextCombo);
 
                     // 1. Get Content from workingContext
                     String freshHtml = "";
@@ -562,10 +581,11 @@ public class AutoWebAgent {
                     }
                     
                     if (freshHtml.isEmpty()) {
-                         uiLogger.accept("Error: Failed to retrieve page content after reload. Please check if the page is loading correctly.");
+                         uiLogger.accept("错误：重新加载后未能成功获取页面内容，请检查页面是否正常加载。");
                          SwingUtilities.invokeLater(() -> {
-                            codeArea.setText("// Error: Failed to retrieve page content. Please try again.");
+                            codeArea.setText("// 错误：未能成功获取页面内容，请稍后重试。");
                             btnGetCode.setEnabled(true);
+                            btnRefine.setEnabled(true);
                         });
                          return; // Exit thread
                     }
@@ -576,23 +596,25 @@ public class AutoWebAgent {
                     if (freshCleanedHtml.length() > 100000) {
                         freshCleanedHtml = freshCleanedHtml.substring(0, 100000) + "...(truncated)";
                     }
-                    uiLogger.accept("Content retrieved. Size: " + freshCleanedHtml.length());
+                    uiLogger.accept("已获取页面内容，清理后大小: " + freshCleanedHtml.length());
                     
                     // 2. Generate Code
                     String code = generateGroovyScript(currentPrompt, freshCleanedHtml);
                     SwingUtilities.invokeLater(() -> {
                         codeArea.setText(code);
                         btnGetCode.setEnabled(true);
+                        btnRefine.setEnabled(true);
                         btnExecute.setEnabled(true);
                     });
-                    uiLogger.accept("Code generated successfully.");
+                    uiLogger.accept("代码生成完成。");
                     
                 } catch (Exception ex) {
                      SwingUtilities.invokeLater(() -> {
-                        codeArea.setText("// Error: " + ex.getMessage());
+                        codeArea.setText("// 错误：" + ex.getMessage());
                         btnGetCode.setEnabled(true);
+                        btnRefine.setEnabled(true);
                     });
-                     uiLogger.accept("Error: " + ex.getMessage());
+                     uiLogger.accept("发生异常：" + ex.getMessage());
                 }
             }).start();
         });
@@ -606,28 +628,28 @@ public class AutoWebAgent {
             String execOutput = outputArea.getText();
 
             if (previousCode == null || previousCode.trim().isEmpty()) {
-                JOptionPane.showMessageDialog(frame, "No code to refine!", "Error", JOptionPane.ERROR_MESSAGE);
+                JOptionPane.showMessageDialog(frame, "当前没有可用于修正的代码。", "提示", JOptionPane.INFORMATION_MESSAGE);
+                return;
+            }
+            if (refineHint == null || refineHint.trim().isEmpty()) {
+                JOptionPane.showMessageDialog(frame, "请先在 Refine 提示框中填写修正说明。", "提示", JOptionPane.INFORMATION_MESSAGE);
                 return;
             }
 
+            btnGetCode.setEnabled(false);
             btnRefine.setEnabled(false);
             btnExecute.setEnabled(false);
-            uiLogger.accept("=== Refining Code with LLM ===");
+            outputArea.setText(""); // Clear output before new operation (execOutput already captured)
+            uiLogger.accept("=== 正在根据执行结果和提示修正代码 ===");
 
+            // Capture selected context for refine too, to guide post-reload search
+            ContextWrapper selectedContext = (ContextWrapper) contextCombo.getSelectedItem();
+            
             new Thread(() -> {
                 try {
-                    ScanResult res = scanContexts(rootPage);
-                    ContextWrapper workingContext = res.best;
-                    if (workingContext == null && !res.wrappers.isEmpty()) {
-                        workingContext = res.wrappers.get(0);
-                    }
-                    if (workingContext == null) {
-                        workingContext = new ContextWrapper();
-                        workingContext.context = rootPage;
-                        workingContext.name = "Main Page";
-                        uiLogger.accept("Fallback to Main Page context for refine.");
-                    }
-
+                    // Use helper to reload and find context (This restores the page state!)
+                    ContextWrapper workingContext = reloadAndFindContext(rootPage, selectedContext, uiLogger, contextCombo);
+                    
                     String freshHtml = "";
                     try {
                         freshHtml = getPageContent(workingContext.context);
@@ -651,15 +673,17 @@ public class AutoWebAgent {
                     String finalRefinedCode = refinedCode;
                     SwingUtilities.invokeLater(() -> {
                         codeArea.setText(finalRefinedCode);
+                        btnGetCode.setEnabled(true);
                         btnRefine.setEnabled(true);
                         btnExecute.setEnabled(true);
                     });
-                    uiLogger.accept("Refined code generated successfully.");
+                    uiLogger.accept("Refine 代码生成完成。");
                 } catch (Exception ex) {
                     SwingUtilities.invokeLater(() -> {
+                        btnGetCode.setEnabled(true);
                         btnRefine.setEnabled(true);
                     });
-                    uiLogger.accept("Refine failed: " + ex.getMessage());
+                    uiLogger.accept("Refine 失败: " + ex.getMessage());
                 }
             }).start();
         });
@@ -671,32 +695,38 @@ public class AutoWebAgent {
             ContextWrapper selectedContext = (ContextWrapper) contextCombo.getSelectedItem();
 
             if (code == null || code.trim().isEmpty()) {
-                JOptionPane.showMessageDialog(frame, "No code to execute!", "Error", JOptionPane.ERROR_MESSAGE);
+                JOptionPane.showMessageDialog(frame, "当前没有可执行的 Groovy 代码。", "提示", JOptionPane.INFORMATION_MESSAGE);
                 return;
             }
             if (selectedContext == null) {
-                JOptionPane.showMessageDialog(frame, "Please select a context first.", "Error", JOptionPane.ERROR_MESSAGE);
+                JOptionPane.showMessageDialog(frame, "请先选择一个目标上下文（Frame/Page）。", "错误", JOptionPane.ERROR_MESSAGE);
                 return;
             }
 
+            btnGetCode.setEnabled(false);
+            btnRefine.setEnabled(false);
             btnExecute.setEnabled(false);
             // Clear output area before execution
             outputArea.setText(""); 
-            uiLogger.accept("=== Executing Code ===");
-            uiLogger.accept("Target Context: " + selectedContext.name);
+            uiLogger.accept("=== 开始执行代码 ===");
+            uiLogger.accept("目标上下文: " + selectedContext.name);
             
             new Thread(() -> {
                 try {
                     executeWithGroovy(code, selectedContext.context, uiLogger);
                     SwingUtilities.invokeLater(() -> {
+                         btnGetCode.setEnabled(true);
+                         btnRefine.setEnabled(true);
                          btnExecute.setEnabled(true);
                     });
-                    uiLogger.accept("=== Execution Finished ===");
+                    uiLogger.accept("=== 代码执行完成 ===");
                 } catch (Exception ex) {
                     SwingUtilities.invokeLater(() -> {
+                        btnGetCode.setEnabled(true);
+                        btnRefine.setEnabled(true);
                         btnExecute.setEnabled(true);
                     });
-                    uiLogger.accept("=== Execution Failed: " + ex.getMessage() + " ===");
+                    uiLogger.accept("=== 代码执行失败: " + ex.getMessage() + " ===");
                 }
             }).start();
         });
