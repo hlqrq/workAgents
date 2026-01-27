@@ -22,9 +22,10 @@ public class AutoWebAgent {
         if (args.length < 2) {
             // Default example if no args provided
             String url = "https://sc.scm121.com/tradeManage/tower/distribute";
-            String userPrompt = "查询待发货的订单，然后会得到的结果表带有表头'序号','订单号','商品信息'等字段，"
-            + "统计一下结果记录的条数（总记录数在页面最底部 有共 xx 条），然后滚动列表，直到单页数据都完整出现，然后输出：1.总的记录数。 "
-            + "2.第一页的记录，每一条记录都为一行，内容通过逗号分隔，去掉内容中回车换行。最后，选中第一行的数据，点击审核推单按钮。";
+            String userPrompt = "请帮我查询“待发货”的订单。等表格加载出来后，" +
+                    "把第一页的每条记录整理成一行，用中文逗号分隔，并去掉换行；" +
+                    "同时输出页面底部显示的总记录数（比如“共xx条”）。" +
+                    "最后选中第一页第一条记录，并点击“审核推单”。";
 
             System.out.println("No arguments provided. Running default example:");
             System.out.println("URL: " + url);
@@ -928,6 +929,7 @@ public class AutoWebAgent {
 
     private static String callActiveModel(String prompt, java.util.function.Consumer<String> uiLogger) {
         System.out.println("Calling LLM (model=" + ACTIVE_MODEL + ")...");
+        long t0 = System.currentTimeMillis();
         String code = "";
         switch (ACTIVE_MODEL) {
             case "QWEN_MAX":
@@ -961,6 +963,10 @@ public class AutoWebAgent {
         // Clean up code block markers if present
         if (code != null) {
             code = code.replaceAll("```groovy", "").replaceAll("```java", "").replaceAll("```", "").trim();
+        }
+        long elapsed = System.currentTimeMillis() - t0;
+        if (uiLogger != null) {
+            uiLogger.accept(String.format("大模型生成耗时: %.2f秒", elapsed / 1000.0));
         }
         return code;
     }

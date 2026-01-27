@@ -15,6 +15,8 @@ public class WebDSL {
     private final Page page;
     private final Frame frame;
     private final Consumer<String> logger;
+    private int defaultTimeout = 30000;
+    private int maxRetries = 3;
 
     public WebDSL(Object context, Consumer<String> logger) {
         if (context instanceof Frame) {
@@ -25,6 +27,16 @@ public class WebDSL {
             this.frame = null;
         }
         this.logger = logger;
+    }
+
+    public WebDSL withDefaultTimeout(int timeoutMs) {
+        this.defaultTimeout = timeoutMs;
+        return this;
+    }
+    
+    public WebDSL withMaxRetries(int retries) {
+        this.maxRetries = Math.max(1, retries);
+        return this;
     }
 
     private Locator locator(String selector) {
@@ -44,37 +56,85 @@ public class WebDSL {
         }
     }
 
+    private void retry(Runnable action, String desc) {
+        int attempt = 0;
+        RuntimeException last = null;
+        while (attempt < maxRetries) {
+            try {
+                action.run();
+                return;
+            } catch (RuntimeException e) {
+                last = e;
+                attempt++;
+                log("Retry " + attempt + "/" + maxRetries + " for " + desc);
+                page.waitForTimeout(500);
+            }
+        }
+        if (last != null) throw last;
+    }
+    
+    private <T> T retrySupply(java.util.function.Supplier<T> supplier, String desc) {
+        int attempt = 0;
+        RuntimeException last = null;
+        while (attempt < maxRetries) {
+            try {
+                return supplier.get();
+            } catch (RuntimeException e) {
+                last = e;
+                attempt++;
+                log("Retry " + attempt + "/" + maxRetries + " for " + desc);
+                page.waitForTimeout(500);
+            }
+        }
+        if (last != null) throw last;
+        return null;
+    }
+
     // --- Basic Interaction ---
 
     public void click(String selector) {
         log("Action: Click '" + selector + "'");
-        highlight(selector);
-        locator(selector).first().click();
+        retry(() -> {
+            waitFor(selector);
+            highlight(selector);
+            locator(selector).first().click();
+        }, "click " + selector);
     }
     
     public void click(String selector, int index) {
         log("Action: Click '" + selector + "' at index " + index);
-        Locator loc = locator(selector).nth(index);
-        highlight(loc);
-        loc.click();
+        retry(() -> {
+            Locator loc = locator(selector).nth(index);
+            highlight(loc);
+            loc.click();
+        }, "click " + selector + " at " + index);
     }
 
     public void type(String selector, String text) {
         log("Action: Type '" + text + "' into '" + selector + "'");
-        highlight(selector);
-        locator(selector).first().fill(text);
+        retry(() -> {
+            waitFor(selector);
+            highlight(selector);
+            locator(selector).first().fill(text);
+        }, "type into " + selector);
     }
     
     public void check(String selector) {
         log("Action: Check '" + selector + "'");
-        highlight(selector);
-        locator(selector).first().check();
+        retry(() -> {
+            waitFor(selector);
+            highlight(selector);
+            locator(selector).first().check();
+        }, "check " + selector);
     }
     
     public void uncheck(String selector) {
         log("Action: Uncheck '" + selector + "'");
-        highlight(selector);
-        locator(selector).first().uncheck();
+        retry(() -> {
+            waitFor(selector);
+            highlight(selector);
+            locator(selector).first().uncheck();
+        }, "uncheck " + selector);
     }
     
     public boolean isChecked(String selector) {
@@ -98,11 +158,14 @@ public class WebDSL {
     }
 
     public String getText(String selector) {
-        return locator(selector).first().innerText();
+        return retrySupply(() -> {
+            waitFor(selector);
+            return locator(selector).first().innerText();
+        }, "getText " + selector);
     }
     
     public String getText(String selector, int index) {
-        return locator(selector).nth(index).innerText();
+        return retrySupply(() -> locator(selector).nth(index).innerText(), "getText " + selector + " at " + index);
     }
     
     public List<String> getAllText(String selector) {
@@ -112,13 +175,40 @@ public class WebDSL {
     public List<String> getAllText(String selector, int index) {
         return locator(selector).nth(index).allInnerTexts();
     }
+    
+    /**
+     * Extracts currently visible row texts without scrolling.
+     * Useful for "first page" data where we should avoid scrolling.
+     */
+    public List<String> extractVisibleList(String rowSelector, int limit) {
+        log("Action: Extract visible list for '" + rowSelector + "' (Limit: " + limit + ")");
+        java.util.Set<String> seen = new java.util.LinkedHashSet<>();
+        java.util.List<String> results = new java.util.ArrayList<>();
+        try {
+            Locator rows = locator(rowSelector);
+            int count = rows.count();
+            for (int i = 0; i < count; i++) {
+                String text = rows.nth(i).innerText();
+                if (text != null) {
+                    text = text.trim();
+                }
+                if (text != null && !text.isEmpty() && seen.add(text)) {
+                    results.add(text);
+                    if (limit > 0 && results.size() >= limit) break;
+                }
+            }
+        } catch (Exception e) {
+            log("Warning: extractVisibleList failed: " + e.getMessage());
+        }
+        log("  -> Extracted " + results.size() + " visible items.");
+        return results;
+    }
 
     // --- Waiting ---
 
     public void waitFor(String selector) {
         log("Wait: For element '" + selector + "'");
-        // Use a reasonable default timeout (e.g., 30s)
-        locator(selector).first().waitFor(new Locator.WaitForOptions().setTimeout(30000));
+        locator(selector).first().waitFor(new Locator.WaitForOptions().setTimeout(defaultTimeout));
     }
     
     public void wait(int millis) {
@@ -154,6 +244,14 @@ public class WebDSL {
         log("Action: Scroll window to bottom");
         page.evaluate("window.scrollTo(0, document.body.scrollHeight)");
     }
+    
+    /**
+     * Scrolls the window to the top.
+     */
+    public void scrollToTop() {
+        log("Action: Scroll window to top");
+        page.evaluate("window.scrollTo(0, 0)");
+    }
 
     /**
      * Scrolls a specific container to its bottom (useful for virtual tables).
@@ -171,6 +269,146 @@ public class WebDSL {
         log("Action: Scroll '" + selector + "' to top");
         highlight(selector);
         locator(selector).first().evaluate("el => { el.scrollTop = 0; el.dispatchEvent(new Event('scroll', { bubbles: true })); }");
+    }
+    
+    private int getScrollTop(String selector) {
+        try {
+            Object v = locator(selector).first().evaluate("el => el.scrollTop");
+            return (v instanceof Number) ? ((Number) v).intValue() : 0;
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+    
+    private int getMaxScrollTop(String selector) {
+        try {
+            Object v = locator(selector).first().evaluate("el => el.scrollHeight - el.clientHeight");
+            return (v instanceof Number) ? ((Number) v).intValue() : 0;
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+    
+    private boolean isAtTop(String selector) {
+        return getScrollTop(selector) <= 2;
+    }
+    
+    private boolean isAtBottom(String selector) {
+        int top = getScrollTop(selector);
+        int max = getMaxScrollTop(selector);
+        return max > 0 && (max - top) <= 2;
+    }
+    
+    private String normalizeText(String s) {
+        if (s == null) return "";
+        return s.replaceAll("[\\r\\n]+", " ").replaceAll("\\s+", " ").trim();
+    }
+    
+    private String md5(String s) {
+        try {
+            byte[] bytes = s.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            java.security.MessageDigest md = java.security.MessageDigest.getInstance("MD5");
+            byte[] digest = md.digest(bytes);
+            StringBuilder sb = new StringBuilder();
+            for (byte b : digest) {
+                sb.append(String.format("%02x", b));
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            return s;
+        }
+    }
+    
+    private boolean isScrollable(String selector) {
+        try {
+            Object v = locator(selector).first().evaluate("el => (el.scrollHeight - el.clientHeight) > 2");
+            if (v instanceof Boolean) return (Boolean) v;
+        } catch (Exception ignored) {}
+        return false;
+    }
+    
+    private String ensureScrollableContainer(String containerSelector, String rowSelector) {
+        if (containerSelector != null && isScrollable(containerSelector)) {
+            return containerSelector;
+        }
+        // Try to detect scrollable ancestor of the first row
+        try {
+            Locator row = locator(rowSelector).first();
+            // Mark scrollable ancestor with a data attribute
+            row.evaluate("el => { " +
+                    "let p = el.parentElement; " +
+                    "while (p) { " +
+                    "  const sh = p.scrollHeight; const ch = p.clientHeight; " +
+                    "  if ((sh - ch) > 2) { " +
+                    "    p.setAttribute('data-webdsl-scroll-target','1'); " +
+                    "    return true; " +
+                    "  } " +
+                    "  p = p.parentElement; " +
+                    "} " +
+                    "return false; " +
+                "}");
+            Locator detected = locator("[data-webdsl-scroll-target='1']").first();
+            if (detected != null && detected.count() > 0) {
+                log("Action: Detected scrollable container via ancestor search");
+                return "[data-webdsl-scroll-target='1']";
+            }
+        } catch (Exception ignored) {}
+        // Fallback to original selector
+        return containerSelector;
+    }
+    
+    public void ensureAtTop(String selector) {
+        log("Action: Ensure '" + selector + "' at top");
+        // Try multiple strategies to reliably return to top
+        for (int i = 0; i < 5 && !isAtTop(selector); i++) {
+            try {
+                locator(selector).first().evaluate("el => el.scrollTop = 0");
+            } catch (Exception ignored) {}
+            page.waitForTimeout(100);
+        }
+        if (!isAtTop(selector)) {
+            // Use wheel up bursts
+            hover(selector);
+            for (int i = 0; i < 4 && !isAtTop(selector); i++) {
+                page.mouse().wheel(0, -1200);
+                page.waitForTimeout(150);
+            }
+        }
+        if (!isAtTop(selector)) {
+            // Use Home key
+            try {
+                page.keyboard().press("Home");
+                page.waitForTimeout(150);
+            } catch (Exception ignored) {}
+        }
+        // Final check, fall back to window top
+        if (!isAtTop(selector)) {
+            log("Warning: Container did not reach top, scrolling window top as fallback");
+            scrollToTop();
+            page.waitForTimeout(150);
+        }
+    }
+    
+    /**
+     * Robustly ensures a scrollable container is at top.
+     * Combines programmatic scrollTop with reverse wheel events to trigger virtual list updates.
+     */
+    public void ensureTop(String selector) {
+        log("Action: Ensure '" + selector + "' is at top");
+        try {
+            // Step 1: Direct scrollTop = 0
+            locator(selector).first().evaluate("el => { el.scrollTop = 0; el.dispatchEvent(new Event('scroll', { bubbles: true })); }");
+            page.waitForTimeout(300);
+            
+            // Step 2: Reverse wheel to force virtualization refresh
+            hover(selector);
+            for (int i = 0; i < 6; i++) {
+                page.mouse().wheel(0, -1200);
+                page.waitForTimeout(200);
+            }
+        } catch (Exception e) {
+            log("Warning: ensureTop failed: " + e.getMessage());
+        }
     }
 
     /**
@@ -257,6 +495,10 @@ public class WebDSL {
         // Fallback: just try the input as a selector even if it didn't look like one
         click(textOrSelector);
     }
+    
+    public void clickWithRetry(String selector) {
+        click(selector);
+    }
 
     // --- Table Helpers ---
     
@@ -274,6 +516,266 @@ public class WebDSL {
             }
         }
         return -1;
+    }
+
+    /**
+     * Advanced: Extracts text from a virtual scrolling list.
+     * Automatically handles scrolling, deduplication, and state restoration.
+     *
+     * @param containerSelector The scrollable container selector (e.g., '.art-table-body').
+     * @param rowSelector       The selector for individual rows (e.g., '.art-table-row').
+     * @param limit             Maximum number of items to extract (use -1 for no limit).
+     * @return List of extracted text from each row.
+     */
+    public List<String> extractList(String containerSelector, String rowSelector, int limit) {
+        log("Action: Extracting list from '" + containerSelector + "' (Limit: " + limit + ")");
+        
+        containerSelector = ensureScrollableContainer(containerSelector, rowSelector);
+        
+        java.util.Set<String> processed = new java.util.HashSet<>();
+        java.util.List<String> results = new java.util.ArrayList<>();
+        
+        int noNewDataCount = 0;
+        int maxScrolls = 80; // Safety break
+        int scrollStep = 300;
+        int wheelStep = 800;
+        
+        // Ensure start from top
+        ensureAtTop(containerSelector);
+        wait(300);
+
+        for (int i = 0; i < maxScrolls; i++) {
+            Locator rows = locator(rowSelector);
+            int count = rows.count();
+            boolean foundNew = false;
+            
+            for (int j = 0; j < count; j++) {
+                String text = "";
+                try { text = rows.nth(j).innerText(); } catch (Exception ignored) {}
+                String normalized = normalizeText(text);
+                String key = md5(normalized);
+                if (!normalized.isEmpty() && !processed.contains(key)) {
+                    processed.add(key);
+                    results.add(normalized);
+                    foundNew = true;
+                    
+                    if (limit > 0 && results.size() >= limit) {
+                        log("  -> Reached limit of " + limit + " items.");
+                        break;
+                    }
+                }
+            }
+            
+            if (limit > 0 && results.size() >= limit) break;
+
+            if (!foundNew) {
+                noNewDataCount++;
+                if (noNewDataCount >= 3) {
+                    log("  -> No new data found for 3 consecutive scrolls. Stopping.");
+                    break;
+                }
+            } else {
+                noNewDataCount = 0;
+            }
+            
+            // Scroll down (combined strategy)
+            if (isAtBottom(containerSelector)) {
+                log("  -> Container reached bottom.");
+                break;
+            }
+            // 1) element scroll
+            scrollBy(containerSelector, scrollStep);
+            wait(500);
+            // 2) wheel scroll to trigger virtual renderers
+            hover(containerSelector);
+            page.mouse().wheel(0, wheelStep);
+            wait(500);
+            
+            // Escalate steps if no new data is found
+            if (!foundNew) {
+                scrollStep = Math.min(scrollStep * 2, 1600);
+                wheelStep = Math.min(wheelStep * 2, 2400);
+            } else {
+                // Reset when new data discovered
+                scrollStep = 300;
+                wheelStep = 800;
+            }
+        }
+        
+        // Restore state to top
+        ensureAtTop(containerSelector);
+        wait(300);
+        
+        log("  -> Extracted " + results.size() + " unique items.");
+        return results;
+    }
+
+    /**
+     * Advanced: Extracts structured data from a virtual scrolling table.
+     * 
+     * @param containerSelector Selector for the scrollable container.
+     * @param rowSelector       Selector for the rows.
+     * @param limit             Max items to extract.
+     * @param columns           Map of "ColumnName" -> "Relative Selector". 
+     *                          Example: {"OrderNo": "td:nth-child(2)", "Status": ".status-label"}
+     * @return List of Maps, where each Map represents a row's data.
+     */
+    public List<java.util.Map<String, String>> extractTableData(String containerSelector, String rowSelector, int limit, java.util.Map<String, String> columns) {
+        log("Action: Extracting table data from '" + containerSelector + "'...");
+        
+        containerSelector = ensureScrollableContainer(containerSelector, rowSelector);
+        
+        java.util.Set<String> processedKeys = new java.util.HashSet<>();
+        List<java.util.Map<String, String>> results = new java.util.ArrayList<>();
+        
+        // Ensure start from top
+        ensureAtTop(containerSelector);
+        wait(300);
+        
+        int maxScrolls = 80;
+        int noNewDataCount = 0;
+        int scrollStep = 300;
+        int wheelStep = 800;
+        
+        for (int i = 0; i < maxScrolls; i++) {
+            Locator rows = locator(rowSelector);
+            int count = rows.count();
+            boolean foundNew = false;
+            
+            for (int j = 0; j < count; j++) {
+                Locator row = rows.nth(j);
+                
+                String raw = "";
+                try { raw = row.innerText(); } catch (Exception ignored) {}
+                String normalized = normalizeText(raw);
+                if (normalized.isEmpty()) {
+                    continue;
+                }
+                String rowKey = md5(normalized);
+                if (processedKeys.contains(rowKey)) {
+                    continue;
+                }
+                
+                // 2. Extract columns
+                java.util.Map<String, String> rowData = new java.util.HashMap<>();
+                
+                for (java.util.Map.Entry<String, String> entry : columns.entrySet()) {
+                    String colName = entry.getKey();
+                    String colSel = entry.getValue();
+                    try {
+                        // Relative selector from the row
+                        Locator colLoc = row.locator(colSel).first();
+                        if (colLoc.count() > 0) {
+                            rowData.put(colName, colLoc.innerText());
+                        } else {
+                            rowData.put(colName, ""); 
+                        }
+                    } catch (Exception e) {
+                        rowData.put(colName, "");
+                    }
+                }
+                
+                processedKeys.add(rowKey);
+                results.add(rowData);
+                foundNew = true;
+                
+                if (limit > 0 && results.size() >= limit) {
+                    log("  -> Reached limit of " + limit + " items.");
+                    break;
+                }
+            }
+            
+            if (limit > 0 && results.size() >= limit) break;
+            
+            if (!foundNew) {
+                noNewDataCount++;
+                if (noNewDataCount >= 3) {
+                    log("  -> No new data found for 3 consecutive scrolls. Stopping.");
+                    break;
+                }
+            } else {
+                noNewDataCount = 0;
+            }
+            
+            // Scroll down (combined strategy)
+            if (isAtBottom(containerSelector)) {
+                log("  -> Container reached bottom.");
+                break;
+            }
+            // 1) element scroll
+            scrollBy(containerSelector, scrollStep);
+            wait(500);
+            // 2) wheel scroll to trigger virtual renderers
+            hover(containerSelector);
+            page.mouse().wheel(0, wheelStep);
+            wait(500);
+            
+            // Escalate steps if no new data is found
+            if (!foundNew) {
+                scrollStep = Math.min(scrollStep * 2, 1600);
+                wheelStep = Math.min(wheelStep * 2, 2400);
+            } else {
+                // Reset when new data discovered
+                scrollStep = 300;
+                wheelStep = 800;
+            }
+        }
+        
+        // Restore state to top
+        ensureAtTop(containerSelector);
+        wait(300);
+        
+        log("  -> Extracted " + results.size() + " structured rows.");
+        return results;
+    }
+
+    /**
+     * Advanced: Locates an item in a virtual list and scrolls it into view.
+     * This ensures the item is visible and ready for interaction.
+     *
+     * @param containerSelector The scrollable container.
+     * @param rowSelector       The row selector.
+     * @param textToFind        The text to search for (partial match).
+     * @return true if found and scrolled to, false otherwise.
+     */
+    public boolean locateItem(String containerSelector, String rowSelector, String textToFind) {
+        log("Action: Locating item containing '" + textToFind + "' in '" + containerSelector + "'");
+        
+        // Start from top to be sure
+        scrollToTop(containerSelector);
+        wait(500);
+        
+        int maxScrolls = 50;
+
+        for (int i = 0; i < maxScrolls; i++) {
+            Locator rows = locator(rowSelector);
+            int count = rows.count();
+            
+            // Search in current view
+            for (int j = 0; j < count; j++) {
+                Locator row = rows.nth(j);
+                String content = row.innerText();
+                if (content != null && content.contains(textToFind)) {
+                    log("  -> Found item at visible index " + j);
+                    highlight(row);
+                    row.scrollIntoViewIfNeeded();
+                    return true;
+                }
+            }
+            
+            // Scroll down to find more
+            mouseWheel(containerSelector, 800);
+            wait(800);
+            
+            // Optimization: If no items are visible, maybe we are scrolling a wrong container?
+            if (count == 0) {
+                 log("  -> Warning: No rows found with selector '" + rowSelector + "'. Stopping.");
+                 break;
+            }
+        }
+        
+        log("  -> Item '" + textToFind + "' not found after " + maxScrolls + " scrolls.");
+        return false;
     }
 
     // --- Groovy Dynamic Fallback ---
