@@ -17,7 +17,7 @@ public class AutoWebAgent {
     private static String ACTIVE_MODEL = "DEEPSEEK";
 
     public static void main(String[] args) {
-
+        cleanDebugDirectory();
         loadPrompts();
         if (args.length < 2) {
             // Default example if no args provided
@@ -27,7 +27,7 @@ public class AutoWebAgent {
             //         "再输出页面底部显示的总记录数（比如“共xx条”）。" +
             //         "最后选中第一页第一条记录，并点击“审核推单”。";
 
-            String userPrompt = "请帮我查询待发货所有的订单，支持翻页，并且逐条输出。";
+            String userPrompt = "请帮我查询待发货所有的订单，支持翻页，并且逐条输出所有字段。";
 
             System.out.println("No arguments provided. Running default example:");
             System.out.println("URL: " + url);
@@ -67,6 +67,23 @@ public class AutoWebAgent {
                 ACTIVE_MODEL = "DEEPSEEK";
             }
             run(args[0], args[1]);
+        }
+    }
+
+    private static void cleanDebugDirectory() {
+        try {
+            Path debugDir = Paths.get(System.getProperty("user.dir"), "autoweb", "debug");
+            if (Files.exists(debugDir)) {
+                System.out.println("Cleaning debug directory: " + debugDir.toAbsolutePath());
+                try (java.util.stream.Stream<Path> walk = Files.walk(debugDir)) {
+                    walk.sorted(java.util.Comparator.reverseOrder())
+                        .map(Path::toFile)
+                        .forEach(java.io.File::delete);
+                }
+            }
+            Files.createDirectories(debugDir);
+        } catch (IOException e) {
+            System.err.println("Warning: Failed to clean debug directory: " + e.getMessage());
         }
     }
 
@@ -469,6 +486,30 @@ public class AutoWebAgent {
         }
     }
 
+    private static void saveDebugCodeVariant(String code, String modelName, String tag, java.util.function.Consumer<String> uiLogger) {
+        if (code == null) return;
+        try {
+            java.nio.file.Path debugDir = java.nio.file.Paths.get(System.getProperty("user.dir"), "autoweb", "debug");
+            if (!java.nio.file.Files.exists(debugDir)) {
+                java.nio.file.Files.createDirectories(debugDir);
+            }
+            String safeModel = modelName == null ? "UNKNOWN" : modelName.trim().replaceAll("[^A-Za-z0-9_\\-]", "_");
+            if (safeModel.isEmpty()) safeModel = "UNKNOWN";
+            String safeTag = tag == null ? "code" : tag.trim().replaceAll("[^A-Za-z0-9_\\-]", "_");
+            if (safeTag.isEmpty()) safeTag = "code";
+            String ts = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss_SSS"));
+            java.nio.file.Path codePath = debugDir.resolve("debug_code_" + safeModel + "_" + safeTag + "_" + ts + ".groovy");
+            java.nio.file.Files.write(codePath, code.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            if (uiLogger != null) {
+                uiLogger.accept("Debug code saved to: " + codePath.toAbsolutePath());
+            }
+        } catch (Exception ex) {
+            if (uiLogger != null) {
+                uiLogger.accept("Failed to save debug code: " + ex.getMessage());
+            }
+        }
+    }
+
     private static void createGUI(Object initialContext, String initialCleanedHtml, String defaultPrompt, PlayWrightUtil.Connection connection) {
         // We need the root Page object to re-scan frames later.
         Page rootPage;
@@ -483,7 +524,7 @@ public class AutoWebAgent {
 
         JFrame frame = new JFrame("AutoWeb 网页自动化控制台");
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        frame.setSize(600, 950);
+        frame.setSize(900, 950);
         frame.setLayout(new BorderLayout());
 
         // Close Playwright on exit
@@ -501,8 +542,7 @@ public class AutoWebAgent {
         JButton btnGetCode = new JButton("生成代码");
         JButton btnRefine = new JButton("修正代码");
         JButton btnExecute = new JButton("执行代码");
-        btnExecute.setEnabled(false);
-
+        
         // --- Top Area: Settings + Prompt ---
         JPanel topContainer = new JPanel(new BorderLayout());
 
@@ -518,52 +558,28 @@ public class AutoWebAgent {
         JLabel lblContext = new JLabel("目标上下文:");
         JComboBox<ContextWrapper> contextCombo = new JComboBox<>();
         contextCombo.setPreferredSize(new Dimension(220, 25));
-        JLabel lblModel = new JLabel("大模型:");
-        JComboBox<String> modelCombo = new JComboBox<>();
-        modelCombo.addItem("DeepSeek");
-        modelCombo.addItem("Qwen-Max");
-        modelCombo.addItem("Moonshot");
-        modelCombo.addItem("GLM");
-        modelCombo.addItem("Minimax");
-        modelCombo.addItem("Gemini");
-        modelCombo.addItem("Ollama Qwen3:8B");
-        if ("QWEN_MAX".equals(ACTIVE_MODEL)) {
-            modelCombo.setSelectedItem("Qwen-Max");
-        } else if ("GEMINI".equals(ACTIVE_MODEL)) {
-            modelCombo.setSelectedItem("Gemini");
-        } else if ("OLLAMA_QWEN3_8B".equals(ACTIVE_MODEL)) {
-            modelCombo.setSelectedItem("Ollama Qwen3:8B");
-        } else if ("MINIMAX".equals(ACTIVE_MODEL)) {
-            modelCombo.setSelectedItem("Minimax");
-        } else if ("MOONSHOT".equals(ACTIVE_MODEL)) {
-            modelCombo.setSelectedItem("Moonshot");
-        } else if ("GLM".equals(ACTIVE_MODEL)) {
-            modelCombo.setSelectedItem("GLM");
-        } else {
-            modelCombo.setSelectedItem("DeepSeek");
-        }
-        modelCombo.addActionListener(e -> {
-            String selected = (String) modelCombo.getSelectedItem();
-            if ("Qwen-Max".equals(selected)) {
-                ACTIVE_MODEL = "QWEN_MAX";
-            } else if ("Gemini".equals(selected)) {
-                ACTIVE_MODEL = "GEMINI";
-            } else if ("Ollama Qwen3:8B".equals(selected)) {
-                ACTIVE_MODEL = "OLLAMA_QWEN3_8B";
-            } else if ("Minimax".equals(selected)) {
-                ACTIVE_MODEL = "MINIMAX";
-            } else if ("Moonshot".equals(selected)) {
-                ACTIVE_MODEL = "MOONSHOT";
-            } else if ("GLM".equals(selected)) {
-                ACTIVE_MODEL = "GLM";
-            } else {
-                ACTIVE_MODEL = "DEEPSEEK";
-            }
-        });
+        
+        JLabel lblModel = new JLabel("大模型(可多选):");
+        String[] models = {"DeepSeek", "Qwen-Max", "Moonshot", "GLM", "Minimax", "Gemini", "Ollama Qwen3:8B"};
+        JList<String> modelList = new JList<>(models);
+        modelList.setSelectionMode(ListSelectionModel.MULTIPLE_INTERVAL_SELECTION);
+        JScrollPane modelScroll = new JScrollPane(modelList);
+        modelScroll.setPreferredSize(new Dimension(150, 60));
+        
+        // Default selection
+        String defaultModel = "DeepSeek";
+        if ("QWEN_MAX".equals(ACTIVE_MODEL)) defaultModel = "Qwen-Max";
+        else if ("GEMINI".equals(ACTIVE_MODEL)) defaultModel = "Gemini";
+        else if ("MOONSHOT".equals(ACTIVE_MODEL)) defaultModel = "Moonshot";
+        else if ("GLM".equals(ACTIVE_MODEL)) defaultModel = "GLM";
+        else if ("MINIMAX".equals(ACTIVE_MODEL)) defaultModel = "Minimax";
+        else if ("OLLAMA_QWEN3_8B".equals(ACTIVE_MODEL)) defaultModel = "Ollama Qwen3:8B";
+        modelList.setSelectedValue(defaultModel, true);
+
         leftSettings.add(lblContext);
         leftSettings.add(contextCombo);
         leftSettings.add(lblModel);
-        leftSettings.add(modelCombo);
+        leftSettings.add(modelScroll);
         
         JPanel rightSettings = new JPanel(new FlowLayout(FlowLayout.RIGHT, 5, 0));
         JButton btnRefreshContext = new JButton("刷新");
@@ -591,7 +607,7 @@ public class AutoWebAgent {
         JTextArea promptArea = new JTextArea(defaultPrompt);
         promptArea.setLineWrap(true);
         promptArea.setWrapStyleWord(true);
-        promptArea.setRows(4);
+        promptArea.setRows(3);
         JScrollPane promptScroll = new JScrollPane(promptArea);
         promptPanel.add(promptScroll, BorderLayout.CENTER);
 
@@ -600,25 +616,22 @@ public class AutoWebAgent {
         JTextArea refineArea = new JTextArea();
         refineArea.setLineWrap(true);
         refineArea.setWrapStyleWord(true);
-        refineArea.setRows(3);
+        refineArea.setRows(2);
         JScrollPane refineScroll = new JScrollPane(refineArea);
         refinePanel.add(refineScroll, BorderLayout.CENTER);
 
-        JPanel promptContainer = new JPanel(new BorderLayout());
-        promptContainer.add(promptPanel, BorderLayout.NORTH);
-        promptContainer.add(refinePanel, BorderLayout.CENTER);
+        JPanel promptContainer = new JPanel(new GridLayout(2, 1));
+        promptContainer.add(promptPanel);
+        promptContainer.add(refinePanel);
         
         topContainer.add(promptContainer, BorderLayout.CENTER);
 
 
-        // --- Middle Area: Groovy Code ---
+        // --- Middle Area: Groovy Code (Tabs) ---
         JPanel codePanel = new JPanel(new BorderLayout());
         codePanel.setBorder(BorderFactory.createTitledBorder("Groovy 代码"));
-        JTextArea codeArea = new JTextArea();
-        codeArea.setFont(new Font("Monospaced", Font.PLAIN, 12));
-        JScrollPane codeScroll = new JScrollPane(codeArea);
-        codePanel.add(codeScroll, BorderLayout.CENTER);
-
+        JTabbedPane codeTabs = new JTabbedPane();
+        codePanel.add(codeTabs, BorderLayout.CENTER);
 
         // --- Bottom Area: Output Log ---
         JPanel outputPanel = new JPanel(new BorderLayout());
@@ -633,11 +646,11 @@ public class AutoWebAgent {
         // --- Split Panes ---
         // Code vs Output
         JSplitPane bottomSplit = new JSplitPane(JSplitPane.VERTICAL_SPLIT, codePanel, outputPanel);
-        bottomSplit.setResizeWeight(0.7);
+        bottomSplit.setResizeWeight(0.5);
 
         // Top (Settings+Prompt) vs Bottom (Code+Output)
         JSplitPane mainSplit = new JSplitPane(JSplitPane.VERTICAL_SPLIT, topContainer, bottomSplit);
-        mainSplit.setResizeWeight(0.25);
+        mainSplit.setResizeWeight(0.15);
         
         frame.add(mainSplit, BorderLayout.CENTER);
 
@@ -681,6 +694,7 @@ public class AutoWebAgent {
         btnGetCode.addActionListener(e -> {
             String currentPrompt = promptArea.getText();
             ContextWrapper selectedContext = (ContextWrapper) contextCombo.getSelectedItem();
+            java.util.List<String> selectedModels = modelList.getSelectedValuesList();
             
             if (currentPrompt == null || currentPrompt.trim().isEmpty()) {
                 JOptionPane.showMessageDialog(frame, "请先在用户命令输入框中填写要执行的指令。", "提示", JOptionPane.INFORMATION_MESSAGE);
@@ -690,40 +704,45 @@ public class AutoWebAgent {
                 JOptionPane.showMessageDialog(frame, "请先选择一个目标上下文（Frame/Page）。", "错误", JOptionPane.ERROR_MESSAGE);
                 return;
             }
+            if (selectedModels.isEmpty()) {
+                JOptionPane.showMessageDialog(frame, "请至少选择一个大模型。", "错误", JOptionPane.ERROR_MESSAGE);
+                return;
+            }
 
             btnGetCode.setEnabled(false);
             btnRefine.setEnabled(false);
             btnExecute.setEnabled(false);
-            outputArea.setText(""); // Clear output before new operation
-            // Reset execution state since we are starting a new generation cycle
+            outputArea.setText(""); // Clear output
             hasExecuted.set(false);
+            codeTabs.removeAll(); // Clear existing tabs
             
-            uiLogger.accept("=== 开始生成代码 ===");
+            uiLogger.accept("=== 开始生成代码 (" + selectedModels.size() + " 个模型) ===");
             uiLogger.accept("目标上下文: " + selectedContext.name);
-            codeArea.setText("// 正在为上下文生成代码: " + selectedContext.name + "...\n// 请稍候...");
-            
+
+            // Create tabs placeholder
+            for (String model : selectedModels) {
+                JTextArea ta = new JTextArea("// 正在等待 " + model + " 生成代码...\n// 请稍候...");
+                ta.setFont(new Font("Monospaced", Font.PLAIN, 12));
+                codeTabs.addTab(model, new JScrollPane(ta));
+            }
+
             new Thread(() -> {
                 try {
-                    // Use helper to reload and find context
+                    // 1. Prepare Context (Shared)
                     ContextWrapper workingContext = reloadAndFindContext(rootPage, selectedContext, uiLogger, contextCombo);
-
-                    // 1. Get Content from workingContext
+                    
                     String freshHtml = "";
                     int retries = 0;
-                    while (retries < 10) { // Increased retries to 10
+                    while (retries < 10) {
                         try {
                             freshHtml = getPageContent(workingContext.context);
                         } catch (Exception contentEx) {
-                             // Retry silently unless debug is needed
-                             try { Thread.sleep(3000); } catch (InterruptedException ie) {} // Wait longer (3s)
+                             try { Thread.sleep(3000); } catch (InterruptedException ie) {}
                              retries++;
                              continue;
                         }
-                        
-                        // Check for loading spinners or empty content
                         if (freshHtml.contains("ant-spin-spinning") || freshHtml.length() < 1000) {
-                             // Retry silently
-                             try { Thread.sleep(3000); } catch (InterruptedException ie) {} // Wait longer (3s)
+                             try { Thread.sleep(3000); } catch (InterruptedException ie) {}
                              retries++;
                         } else {
                             break;
@@ -731,57 +750,84 @@ public class AutoWebAgent {
                     }
                     
                     if (freshHtml.isEmpty()) {
-                         uiLogger.accept("错误：重新加载后未能成功获取页面内容，请检查页面是否正常加载。");
+                         uiLogger.accept("错误：重新加载后未能成功获取页面内容。");
                          SwingUtilities.invokeLater(() -> {
-                            codeArea.setText("// 错误：未能成功获取页面内容，请稍后重试。");
-                            btnGetCode.setEnabled(true);
-                            btnRefine.setEnabled(true);
-                        });
-                         return; // Exit thread
+                             btnGetCode.setEnabled(true);
+                             btnRefine.setEnabled(true);
+                             btnExecute.setEnabled(true);
+                         });
+                         return;
                     }
 
-
                     String freshCleanedHtml = HTMLCleaner.clean(freshHtml);
-                    
                     if (freshCleanedHtml.length() > 500000) {
                         freshCleanedHtml = freshCleanedHtml.substring(0, 500000) + "...(truncated)";
                     }
                     uiLogger.accept("已获取页面内容，清理后大小: " + freshCleanedHtml.length());
-                    
-                    // Save HTML debug files
                     saveDebugArtifacts(freshHtml, freshCleanedHtml, null, uiLogger);
                     
-                    // 2. Generate Code
-                    String generatedCode = generateGroovyScript(currentPrompt, freshCleanedHtml, uiLogger);
-                    String normalizedCode = normalizeGeneratedGroovy(generatedCode);
-                    if (normalizedCode != null && !normalizedCode.equals(generatedCode)) {
-                        java.util.List<String> normalizeErrors = GroovyLinter.check(normalizedCode);
-                        boolean hasSyntaxIssue = normalizeErrors.stream().anyMatch(e2 -> e2.startsWith("Syntax Error") || e2.startsWith("Parse Error"));
-                        if (!hasSyntaxIssue) {
-                            uiLogger.accept("已自动规范化表格提取逻辑。");
-                            generatedCode = normalizedCode;
-                        } else {
-                            uiLogger.accept("规范化后语法校验失败，已回退到原始生成代码。");
-                        }
+                    // 2. Parallel Generation
+                    java.util.concurrent.ExecutorService executor = java.util.concurrent.Executors.newFixedThreadPool(selectedModels.size());
+                    java.util.List<java.util.concurrent.Future<?>> futures = new java.util.ArrayList<>();
+
+                    String finalCleanedHtml = freshCleanedHtml;
+                    
+                    for (String modelName : selectedModels) {
+                        futures.add(executor.submit(() -> {
+                            try {
+                                String generatedCode = generateGroovyScript(currentPrompt, finalCleanedHtml, uiLogger, modelName);
+                                String normalizedCode = normalizeGeneratedGroovy(generatedCode);
+                                if (normalizedCode != null && !normalizedCode.equals(generatedCode)) {
+                                    java.util.List<String> normalizeErrors = GroovyLinter.check(normalizedCode);
+                                    boolean hasSyntaxIssue = normalizeErrors.stream().anyMatch(e2 -> e2.startsWith("Syntax Error") || e2.startsWith("Parse Error"));
+                                    if (!hasSyntaxIssue) {
+                                        generatedCode = normalizedCode;
+                                    }
+                                }
+                                
+                                String finalCode = generatedCode;
+                                saveDebugCodeVariant(finalCode, modelName, "gen", uiLogger);
+
+                                SwingUtilities.invokeLater(() -> {
+                                    int idx = codeTabs.indexOfTab(modelName);
+                                    if (idx >= 0) {
+                                        JScrollPane sp = (JScrollPane) codeTabs.getComponentAt(idx);
+                                        JTextArea ta = (JTextArea) sp.getViewport().getView();
+                                        ta.setText(finalCode);
+                                    }
+                                });
+                            } catch (Exception genEx) {
+                                SwingUtilities.invokeLater(() -> {
+                                    int idx = codeTabs.indexOfTab(modelName);
+                                    if (idx >= 0) {
+                                        JScrollPane sp = (JScrollPane) codeTabs.getComponentAt(idx);
+                                        JTextArea ta = (JTextArea) sp.getViewport().getView();
+                                        ta.setText("// 生成失败: " + genEx.getMessage());
+                                    }
+                                });
+                            }
+                        }));
                     }
                     
-                    // Save generated code to debug file
-                    saveDebugArtifacts(null, null, generatedCode, uiLogger);
-                    String finalCode = generatedCode;
-
+                    // Wait for all
+                    for (java.util.concurrent.Future<?> f : futures) {
+                        try { f.get(); } catch (Exception ignored) {}
+                    }
+                    executor.shutdown();
+                    
                     SwingUtilities.invokeLater(() -> {
-                        codeArea.setText(finalCode);
                         btnGetCode.setEnabled(true);
                         btnRefine.setEnabled(true);
                         btnExecute.setEnabled(true);
+                        uiLogger.accept("所有模型生成完成。");
                     });
-                    uiLogger.accept("代码生成完成。");
-                    
+
                 } catch (Exception ex) {
+                    ex.printStackTrace();
                      SwingUtilities.invokeLater(() -> {
-                        codeArea.setText("// 错误：" + ex.getMessage());
                         btnGetCode.setEnabled(true);
                         btnRefine.setEnabled(true);
+                        btnExecute.setEnabled(true);
                     });
                      uiLogger.accept("发生异常：" + ex.getMessage());
                 }
@@ -791,9 +837,18 @@ public class AutoWebAgent {
 
         // --- Logic: Refine Code ---
         btnRefine.addActionListener(e -> {
+            int selectedIndex = codeTabs.getSelectedIndex();
+            if (selectedIndex < 0) {
+                JOptionPane.showMessageDialog(frame, "请先选择一个包含代码的标签页。", "提示", JOptionPane.INFORMATION_MESSAGE);
+                return;
+            }
+            String modelName = codeTabs.getTitleAt(selectedIndex);
+            JScrollPane sp = (JScrollPane) codeTabs.getComponentAt(selectedIndex);
+            JTextArea codeArea = (JTextArea) sp.getViewport().getView();
+            String previousCode = codeArea.getText();
+
             String currentPrompt = promptArea.getText();
             String refineHint = refineArea.getText();
-            String previousCode = codeArea.getText();
             String execOutput = outputArea.getText();
 
             if (previousCode == null || previousCode.trim().isEmpty()) {
@@ -801,63 +856,54 @@ public class AutoWebAgent {
                 return;
             }
             if (refineHint == null || refineHint.trim().isEmpty()) {
-                JOptionPane.showMessageDialog(frame, "请先在 Refine 提示框中填写修正说明。", "提示", JOptionPane.INFORMATION_MESSAGE);
-                return;
+                int choice = JOptionPane.showConfirmDialog(
+                        frame,
+                        "未填写修正说明。是否直接提交修正？",
+                        "提示",
+                        JOptionPane.YES_NO_OPTION,
+                        JOptionPane.INFORMATION_MESSAGE
+                );
+                if (choice != JOptionPane.YES_OPTION) {
+                    refineArea.requestFocusInWindow();
+                    return;
+                }
             }
 
             btnGetCode.setEnabled(false);
             btnRefine.setEnabled(false);
             btnExecute.setEnabled(false);
-            outputArea.setText(""); // Clear output before new operation (execOutput already captured)
-            uiLogger.accept("=== 正在根据执行结果和提示修正代码 ===");
+            outputArea.setText(""); 
+            uiLogger.accept("=== 正在修正代码 (模型: " + modelName + ") ===");
 
-            // Capture selected context for refine too, to guide post-reload search
             ContextWrapper selectedContext = (ContextWrapper) contextCombo.getSelectedItem();
             
             new Thread(() -> {
                 try {
-                    // Use helper to reload and find context (This restores the page state!)
                     ContextWrapper workingContext = reloadAndFindContext(rootPage, selectedContext, uiLogger, contextCombo);
-                    
                     String freshHtml = "";
                     try {
                         freshHtml = getPageContent(workingContext.context);
-                    } catch (Exception contentEx) {
-                        uiLogger.accept("Failed to get page content for refine: " + contentEx.getMessage());
-                    }
+                    } catch (Exception contentEx) {}
 
                     String freshCleanedHtml = HTMLCleaner.clean(freshHtml);
                     if (freshCleanedHtml.length() > 500000) {
                         freshCleanedHtml = freshCleanedHtml.substring(0, 500000) + "...(truncated)";
                     }
-
-                    // Save HTML debug files
                     saveDebugArtifacts(freshHtml, freshCleanedHtml, null, uiLogger);
 
                     String refinedCode = generateRefinedGroovyScript(
-                        currentPrompt,
-                        freshCleanedHtml,
-                        previousCode,
-                        execOutput,
-                        refineHint,
-                        uiLogger
+                        currentPrompt, freshCleanedHtml, previousCode, execOutput, refineHint, uiLogger, modelName
                     );
 
                     String normalizedRefined = normalizeGeneratedGroovy(refinedCode);
                     if (normalizedRefined != null && !normalizedRefined.equals(refinedCode)) {
-                        java.util.List<String> normalizeErrors = GroovyLinter.check(normalizedRefined);
-                        boolean hasSyntaxIssue = normalizeErrors.stream().anyMatch(e2 -> e2.startsWith("Syntax Error") || e2.startsWith("Parse Error"));
-                        if (!hasSyntaxIssue) {
-                            uiLogger.accept("已自动规范化表格提取逻辑。");
-                            refinedCode = normalizedRefined;
-                        } else {
-                            uiLogger.accept("规范化后语法校验失败，已回退到原始生成代码。");
-                        }
+                         java.util.List<String> normalizeErrors = GroovyLinter.check(normalizedRefined);
+                         if (normalizeErrors.isEmpty()) {
+                             refinedCode = normalizedRefined;
+                         }
                     }
                     String finalRefinedCode = refinedCode;
-                    
-                    // Save refined code to debug file
-                    saveDebugArtifacts(null, null, finalRefinedCode, uiLogger);
+                    saveDebugCodeVariant(finalRefinedCode, modelName, "refine", uiLogger);
 
                     SwingUtilities.invokeLater(() -> {
                         codeArea.setText(finalRefinedCode);
@@ -865,11 +911,12 @@ public class AutoWebAgent {
                         btnRefine.setEnabled(true);
                         btnExecute.setEnabled(true);
                     });
-                    uiLogger.accept("Refine 代码生成完成。");
+                    uiLogger.accept("Refine 完成。");
                 } catch (Exception ex) {
                     SwingUtilities.invokeLater(() -> {
                         btnGetCode.setEnabled(true);
                         btnRefine.setEnabled(true);
+                        btnExecute.setEnabled(true);
                     });
                     uiLogger.accept("Refine 失败: " + ex.getMessage());
                 }
@@ -879,43 +926,42 @@ public class AutoWebAgent {
 
         // --- Logic: Execute Code ---
         btnExecute.addActionListener(e -> {
+            int selectedIndex = codeTabs.getSelectedIndex();
+            if (selectedIndex < 0) {
+                JOptionPane.showMessageDialog(frame, "请先选择一个包含代码的标签页。", "提示", JOptionPane.INFORMATION_MESSAGE);
+                return;
+            }
+            JScrollPane sp = (JScrollPane) codeTabs.getComponentAt(selectedIndex);
+            JTextArea codeArea = (JTextArea) sp.getViewport().getView();
             String code = codeArea.getText();
+            
             ContextWrapper selectedContext = (ContextWrapper) contextCombo.getSelectedItem();
 
             if (code == null || code.trim().isEmpty()) {
-                JOptionPane.showMessageDialog(frame, "当前没有可执行的 Groovy 代码。", "提示", JOptionPane.INFORMATION_MESSAGE);
+                JOptionPane.showMessageDialog(frame, "当前没有可执行的代码。", "提示", JOptionPane.INFORMATION_MESSAGE);
                 return;
             }
             if (selectedContext == null) {
-                JOptionPane.showMessageDialog(frame, "请先选择一个目标上下文（Frame/Page）。", "错误", JOptionPane.ERROR_MESSAGE);
+                JOptionPane.showMessageDialog(frame, "请先选择一个目标上下文。", "错误", JOptionPane.ERROR_MESSAGE);
                 return;
             }
 
             btnGetCode.setEnabled(false);
             btnRefine.setEnabled(false);
             btnExecute.setEnabled(false);
-            // Clear output area before execution
             outputArea.setText(""); 
             uiLogger.accept("=== 开始执行代码 ===");
             
             new Thread(() -> {
                 try {
                     Object executionTarget = selectedContext.context;
-                    
-                    // Check if already executed once, if so, reload page to restore state
                     if (hasExecuted.get()) {
-                         uiLogger.accept("检测到代码已执行过，正在重置页面状态以确保环境纯净...");
-                         // Reload and find context again
+                         uiLogger.accept("检测到代码已执行过，正在重置页面状态...");
                          ContextWrapper freshContext = reloadAndFindContext(rootPage, selectedContext, uiLogger, contextCombo);
                          executionTarget = freshContext.context;
-                         uiLogger.accept("页面状态已重置，使用新上下文: " + freshContext.name);
-                    } else {
-                        uiLogger.accept("首次执行，使用当前上下文: " + selectedContext.name);
                     }
                     
                     executeWithGroovy(code, executionTarget, uiLogger);
-                    
-                    // Mark as executed
                     hasExecuted.set(true);
                     
                     SwingUtilities.invokeLater(() -> {
@@ -923,21 +969,21 @@ public class AutoWebAgent {
                          btnRefine.setEnabled(true);
                          btnExecute.setEnabled(true);
                     });
-                    uiLogger.accept("=== 代码执行完成 ===");
+                    uiLogger.accept("=== 执行完成 ===");
                 } catch (Exception ex) {
                     SwingUtilities.invokeLater(() -> {
                         btnGetCode.setEnabled(true);
                         btnRefine.setEnabled(true);
                         btnExecute.setEnabled(true);
                     });
-                    uiLogger.accept("=== 代码执行失败: " + ex.getMessage() + " ===");
+                    uiLogger.accept("=== 执行失败: " + ex.getMessage() + " ===");
                 }
             }).start();
         });
 
         // Initialize frame size/location
         Dimension screenSize = Toolkit.getDefaultToolkit().getScreenSize();
-        int width = 800;
+        int width = 900;
         int height = screenSize.height - 50;
         frame.setSize(width, height);
         frame.setLocation(screenSize.width - width, 0);
@@ -967,45 +1013,53 @@ public class AutoWebAgent {
         }
         return "";
     }
+    
+    private static String getModelKey(String displayName) {
+        if (displayName == null) return "DEEPSEEK";
+        switch (displayName) {
+            case "Qwen-Max": return "QWEN_MAX";
+            case "Gemini": return "GEMINI";
+            case "Ollama Qwen3:8B": return "OLLAMA_QWEN3_8B";
+            case "Minimax": return "MINIMAX";
+            case "Moonshot": return "MOONSHOT";
+            case "GLM": return "GLM";
+            case "DeepSeek": return "DEEPSEEK";
+            default: return "DEEPSEEK";
+        }
+    }
 
-    private static String callActiveModel(String prompt, java.util.function.Consumer<String> uiLogger) {
-        System.out.println("Calling LLM (model=" + ACTIVE_MODEL + ")...");
+    private static String callModel(String modelName, String prompt, java.util.function.Consumer<String> uiLogger) {
+        String modelKey = getModelKey(modelName);
+        System.out.println("Calling LLM (model=" + modelKey + ")...");
         long t0 = System.currentTimeMillis();
         String code = "";
-        switch (ACTIVE_MODEL) {
+        
+        switch (modelKey) {
             case "QWEN_MAX":
                 code = LLMUtil.chatWithAliyun(prompt);
                 break;
             case "MINIMAX":
                 code = callLLMWithTimeout(() -> LLMUtil.chatWithMinimax(prompt), 180000L, uiLogger, "Minimax");
                 if (code == null || code.trim().isEmpty()) {
-                    if (uiLogger != null) {
-                        uiLogger.accept("Minimax 调用未返回结果或发生错误。");
-                    }
+                    if (uiLogger != null) uiLogger.accept("Minimax 调用未返回结果或发生错误。");
                 }
                 break;
             case "MOONSHOT":
                 code = callLLMWithTimeout(() -> LLMUtil.chatWithMoonshot(prompt), 180000L, uiLogger, "Moonshot");
                 if (code == null || code.trim().isEmpty()) {
-                    if (uiLogger != null) {
-                        uiLogger.accept("Moonshot 调用未返回结果或发生错误。");
-                    }
+                    if (uiLogger != null) uiLogger.accept("Moonshot 调用未返回结果或发生错误。");
                 }
                 break;
             case "GLM":
                 code = callLLMWithTimeout(() -> LLMUtil.chatWithGLM(prompt), 180000L, uiLogger, "GLM");
                 if (code == null || code.trim().isEmpty()) {
-                    if (uiLogger != null) {
-                        uiLogger.accept("GLM 调用未返回结果或发生错误。");
-                    }
+                    if (uiLogger != null) uiLogger.accept("GLM 调用未返回结果或发生错误。");
                 }
                 break;
             case "GEMINI":
                 code = callLLMWithTimeout(() -> LLMUtil.chatWithGemini(prompt), 180000L, uiLogger, "Gemini");
                 if (code == null || code.trim().isEmpty()) {
-                    if (uiLogger != null) {
-                        uiLogger.accept("Gemini 调用未返回结果或发生错误。");
-                    }
+                    if (uiLogger != null) uiLogger.accept("Gemini 调用未返回结果或发生错误。");
                 }
                 break;
             case "OLLAMA_QWEN3_8B":
@@ -1017,18 +1071,17 @@ public class AutoWebAgent {
                 break;
         }
         
-        // Clean up code block markers if present
         if (code != null) {
             code = code.replaceAll("```groovy", "").replaceAll("```java", "").replaceAll("```", "").trim();
         }
         long elapsed = System.currentTimeMillis() - t0;
         if (uiLogger != null) {
-            uiLogger.accept(String.format("大模型生成耗时: %.2f秒", elapsed / 1000.0));
+            uiLogger.accept(String.format("模型 %s 生成耗时: %.2f秒", modelName, elapsed / 1000.0));
         }
         return code;
     }
 
-    private static String generateGroovyScript(String userPrompt, String cleanedHtml, java.util.function.Consumer<String> uiLogger) {
+    private static String generateGroovyScript(String userPrompt, String cleanedHtml, java.util.function.Consumer<String> uiLogger, String modelName) {
         if (GROOVY_SCRIPT_PROMPT_TEMPLATE == null || GROOVY_SCRIPT_PROMPT_TEMPLATE.isEmpty()) {
             loadPrompts();
         }
@@ -1039,7 +1092,7 @@ public class AutoWebAgent {
             uiLogger.accept("Prompt Context Length (Get Code): " + prompt.length() + " chars");
         }
 
-        return callActiveModel(prompt, uiLogger);
+        return callModel(modelName, prompt, uiLogger);
     }
 
     private static String generateRefinedGroovyScript(
@@ -1048,7 +1101,8 @@ public class AutoWebAgent {
         String previousCode,
         String execOutput,
         String refineHint,
-        java.util.function.Consumer<String> uiLogger
+        java.util.function.Consumer<String> uiLogger,
+        String modelName
     ) {
         if (REFINED_GROOVY_SCRIPT_PROMPT_TEMPLATE == null || REFINED_GROOVY_SCRIPT_PROMPT_TEMPLATE.isEmpty()) {
             loadPrompts();
@@ -1067,7 +1121,7 @@ public class AutoWebAgent {
             uiLogger.accept("Prompt Context Length (Refine Code): " + prompt.length() + " chars");
         }
 
-        return callActiveModel(prompt, uiLogger);
+        return callModel(modelName, prompt, uiLogger);
     }
     
     private static String normalizeGeneratedGroovy(String code) {

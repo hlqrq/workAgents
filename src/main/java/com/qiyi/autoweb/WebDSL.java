@@ -3,6 +3,7 @@ package com.qiyi.autoweb;
 import com.microsoft.playwright.Frame;
 import com.microsoft.playwright.Locator;
 import com.microsoft.playwright.Page;
+import com.alibaba.fastjson2.JSON;
 import java.util.List;
 import java.util.function.Consumer;
 
@@ -236,6 +237,24 @@ public class WebDSL {
         loc.waitFor(new Locator.WaitForOptions().setTimeout(defaultTimeout));
     }
     
+    public void waitFor(String selector, Number timeout) {
+        log("Wait: For element '" + selector + "' with timeout " + timeout);
+        Locator loc = locator(selector).first();
+        loc.waitFor(new Locator.WaitForOptions().setTimeout(timeout.doubleValue()));
+    }
+
+    /**
+     * Fallback for waitFor with options (ignored)
+     */
+    public void waitFor(String selector, Object options) {
+        if (options instanceof Number) {
+            waitFor(selector, (Number) options);
+            return;
+        }
+        log("Wait: For element '" + selector + "' (ignoring extra options)");
+        waitFor(selector);
+    }
+
     public void wait(int millis) {
         log("Wait: " + millis + "ms");
         page.waitForTimeout(millis);
@@ -423,12 +442,151 @@ public class WebDSL {
         return extractTableData(containerSelector, rowSelector, size, columns);
     }
     
+    /**
+     * Fallback method for simpler calls (inferred selectors)
+     */
+    public List<java.util.Map<String, String>> extractFirstPageTable(java.util.Map<?, ?> columns) {
+        // Heuristic to find table
+        String[] containers = {".art-table-body", ".ant-table-tbody", ".el-table__body-wrapper", "table tbody", "table"};
+        String[] rows = {".art-table-row", ".ant-table-row", ".el-table__row", "tr", "tr"};
+        
+        for (int i=0; i<containers.length; i++) {
+             // check if container exists and has rows
+             try {
+                 if (count(containers[i]) > 0 && count(containers[i] + " " + rows[i]) > 0) {
+                     log("Action: Heuristic found table: " + containers[i]);
+                     return extractFirstPageTable(containers[i], rows[i], columns);
+                 }
+             } catch (Exception ignored) {}
+        }
+        // Fallback to global tr if nothing matches
+        return extractFirstPageTable(null, "tr", columns);
+    }
+
+    public List<java.util.Map<String, String>> extractPagesTable(String containerSelector, String rowSelector, java.util.Map<?, ?> columns, String nextBtnSelector, int maxPages) {
+        log("Action: Extract pages table using next button '" + nextBtnSelector + "' (Max pages: " + maxPages + ")");
+        List<java.util.Map<String, String>> allData = new java.util.ArrayList<>();
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        int pageCount = 0;
+        
+        while (pageCount < maxPages) {
+            // Extract current page
+            List<java.util.Map<String, String>> pageData = extractFirstPageTable(containerSelector, rowSelector, columns);
+            if (pageData != null && !pageData.isEmpty()) {
+                int added = 0;
+                for (java.util.Map<String, String> row : pageData) {
+                    String signature = JSON.toJSONString(row);
+                    if (seen.add(signature)) {
+                        allData.add(row);
+                        added++;
+                    }
+                }
+                log("Extracted " + added + " new rows from page " + (pageCount + 1));
+            } else {
+                log("Warning: No data found on page " + (pageCount + 1));
+            }
+            
+            pageCount++;
+            if (pageCount >= maxPages) break;
+
+            // Check next button
+            try {
+                Locator nextBtn = locator(nextBtnSelector).first();
+                if (nextBtn.count() == 0 || !nextBtn.isVisible()) {
+                    log("Next button not found or invisible. Stopping.");
+                    break;
+                }
+                
+                String classAttr = nextBtn.getAttribute("class");
+                if (nextBtn.isDisabled() || (classAttr != null && classAttr.toLowerCase().contains("disabled"))) {
+                    log("Next button is disabled. Stopping.");
+                    break;
+                }
+                
+                highlight(nextBtn);
+                nextBtn.click();
+                
+                // Wait for load
+                page.waitForTimeout(2000); 
+                
+            } catch (Exception e) {
+                log("Error handling next button: " + e.getMessage());
+                break;
+            }
+        }
+        
+        return allData;
+    }
+    
     private boolean isScrollable(String selector) {
         try {
             Object v = locator(selector).first().evaluate("el => (el.scrollHeight - el.clientHeight) > 2");
             if (v instanceof Boolean) return (Boolean) v;
         } catch (Exception ignored) {}
         return false;
+    }
+
+    private boolean isSelectorLike(String selector) {
+        if (selector == null) return false;
+        String trimmed = selector.trim();
+        if (trimmed.isEmpty()) return false;
+        if (trimmed.matches(".*[\\.\\#\\[\\]:>].*")) return true;
+        if (trimmed.contains("nth-child") || trimmed.contains("td") || trimmed.contains("th") || trimmed.contains("tr")) return true;
+        if (trimmed.contains("text=") || trimmed.contains(">>")) return true;
+        return false;
+    }
+
+    private java.util.Map<String, Integer> buildHeaderIndex(String containerSelector) {
+        java.util.Map<String, Integer> headerIndex = new java.util.HashMap<>();
+        Locator headerCells = null;
+        try {
+            page.evaluate("() => document.querySelectorAll('[data-webdsl-table-root]').forEach(el => el.removeAttribute('data-webdsl-table-root'))");
+        } catch (Exception ignored) {}
+        try {
+            if (containerSelector != null && !containerSelector.trim().isEmpty()) {
+                Locator container = locator(containerSelector).first();
+                try {
+                    container.evaluate("el => { let p = el; while (p) { const cls = (p.className && p.className.toString) ? p.className.toString() : ''; if (cls.includes('art-table') || cls.includes('table')) { p.setAttribute('data-webdsl-table-root','1'); return true; } p = p.parentElement; } return false; }");
+                } catch (Exception ignored) {}
+                Locator root = locator("[data-webdsl-table-root='1']").first();
+                if (root != null && root.count() > 0) {
+                    headerCells = root.locator(".art-table-header-cell, .art-table-header th, thead th, th");
+                }
+            }
+        } catch (Exception ignored) {}
+        if (headerCells == null || headerCells.count() == 0) {
+            headerCells = locator(".art-table-header-cell, .art-table-header th, thead th, th");
+        }
+        int count = headerCells.count();
+        for (int i = 0; i < count; i++) {
+            String text = "";
+            try { text = normalizeText(headerCells.nth(i).innerText()); } catch (Exception ignored) {}
+            if (!text.isEmpty() && !headerIndex.containsKey(text)) {
+                headerIndex.put(text, i + 1);
+            }
+        }
+        return headerIndex;
+    }
+
+    private java.util.Map<String, String> resolveColumnSelectors(String containerSelector, java.util.Map<?, ?> columns) {
+        java.util.Map<String, String> resolved = new java.util.HashMap<>();
+        java.util.Map<String, Integer> headerIndex = buildHeaderIndex(containerSelector);
+        for (java.util.Map.Entry<?, ?> entry : columns.entrySet()) {
+            String colName = entry.getKey() == null ? "" : entry.getKey().toString();
+            String colSel = entry.getValue() == null ? "" : entry.getValue().toString();
+            String resolvedSel = colSel;
+            if (!isSelectorLike(colSel)) {
+                Integer idx = headerIndex.get(colSel);
+                if (idx == null && !colName.isEmpty()) {
+                    idx = headerIndex.get(colName);
+                }
+                if (idx != null) {
+                    resolvedSel = "td:nth-child(" + idx + ")";
+                }
+            }
+            resolved.put(colName, resolvedSel);
+        }
+        return resolved;
     }
     
     private Locator getRowsInContainer(String containerSelector, String rowSelector) {
@@ -797,6 +955,7 @@ public class WebDSL {
         log("Action: Extracting table data from '" + containerSelector + "'...");
         
         containerSelector = ensureScrollableContainer(containerSelector, rowSelector);
+        java.util.Map<String, String> resolvedColumns = resolveColumnSelectors(containerSelector, columns);
         
         java.util.Set<String> processedKeys = new java.util.HashSet<>();
         List<java.util.Map<String, String>> results = new java.util.ArrayList<>();
@@ -833,18 +992,33 @@ public class WebDSL {
                 java.util.Map<String, String> rowData = new java.util.HashMap<>();
                 
                 for (java.util.Map.Entry<?, ?> entry : columns.entrySet()) {
-                    String colName = String.valueOf(entry.getKey());
-                    String colSel = String.valueOf(entry.getValue());
+                    String colName = entry.getKey() == null ? "" : entry.getKey().toString();
+                    String rawColSel = entry.getValue() == null ? "" : entry.getValue().toString();
+                    String colSel = resolvedColumns.getOrDefault(colName, rawColSel);
+                    String aliasKey = null;
+                    if (!rawColSel.isEmpty() && !isSelectorLike(rawColSel) && !colName.isEmpty() && colName.matches("\\d+")) {
+                        aliasKey = rawColSel;
+                    }
                     try {
                         // Relative selector from the row
                         Locator colLoc = row.locator(colSel).first();
                         if (colLoc.count() > 0) {
-                            rowData.put(colName, colLoc.innerText());
+                            String val = colLoc.innerText();
+                            rowData.put(colName, val);
+                            if (aliasKey != null && !aliasKey.equals(colName)) {
+                                rowData.put(aliasKey, val);
+                            }
                         } else {
                             rowData.put(colName, ""); 
+                            if (aliasKey != null && !aliasKey.equals(colName)) {
+                                rowData.put(aliasKey, "");
+                            }
                         }
                     } catch (Exception e) {
                         rowData.put(colName, "");
+                        if (aliasKey != null && !aliasKey.equals(colName)) {
+                            rowData.put(aliasKey, "");
+                        }
                     }
                 }
                 
@@ -954,7 +1128,8 @@ public class WebDSL {
                     }
                 } catch (Exception ignored) {}
                 
-                String joined = String.join("，", cells);
+                // Use JSON format for row text to ensure consistency across LLMs
+                String joined = JSON.toJSONString(cells);
                 String key;
                 String head = cells.isEmpty() ? "" : cells.get(0);
                 if (!head.isEmpty() && head.matches("\\d+")) {
@@ -963,7 +1138,8 @@ public class WebDSL {
                     String keySource = joined;
                     if (!cells.isEmpty()) {
                         int keyCount = Math.min(3, cells.size());
-                        keySource = String.join("，", cells.subList(0, keyCount));
+                        // Use JSON for key source as well for consistency
+                        keySource = JSON.toJSONString(cells.subList(0, keyCount));
                     }
                     key = "md5:" + md5(keySource);
                 }
@@ -1108,33 +1284,100 @@ public class WebDSL {
 
     /**
      * Handles dynamic method calls from Groovy that are not explicitly defined.
-     * 1. Tries to match existing methods by name (ignoring extra arguments if fuzzy match works).
-     * 2. Tries to forward the call to the underlying Playwright Page/Frame object.
+     * Implements a "Smart Dispatch" strategy to find the best matching method 
+     * by adapting arguments (truncation, padding, type conversion).
      */
     public Object methodMissing(String name, Object args) {
         Object[] argArray = (args instanceof Object[]) ? (Object[]) args : new Object[]{args};
         
-        log("Warning: Method '" + name + "' not found in WebDSL with " + argArray.length + " args. Attempting fallback...");
+        log("Warning: Method '" + name + "' not found in WebDSL with " + argArray.length + " args. Searching for best match...");
 
-        // Strategy 1: Fuzzy Match (Find method with same name but fewer arguments)
-        // e.g. getAllText(selector, index) -> getAllText(selector)
-        try {
-            for (java.lang.reflect.Method m : this.getClass().getMethods()) {
-                if (m.getName().equals(name)) {
-                    int paramCount = m.getParameterCount();
-                    if (paramCount < argArray.length && paramCount > 0) {
-                        // Check if the first N arguments match types (roughly)
-                        // For simplicity, just try to invoke it with the first N args
-                        Object[] truncatedArgs = new Object[paramCount];
-                        System.arraycopy(argArray, 0, truncatedArgs, 0, paramCount);
-                        
-                        log("  -> Fuzzy match found: " + name + " with " + paramCount + " args. Invoking...");
-                        return m.invoke(this, truncatedArgs);
+        java.lang.reflect.Method bestMethod = null;
+        Object[] bestConvertedArgs = null;
+        int bestScore = -1;
+
+        for (java.lang.reflect.Method m : this.getClass().getMethods()) {
+            if (!m.getName().equals(name)) continue;
+
+            Class<?>[] paramTypes = m.getParameterTypes();
+            int paramCount = paramTypes.length;
+            
+            // Calculate Match Score
+            // Base score: Preference for exact parameter count
+            int score = 0;
+            if (paramCount == argArray.length) {
+                score = 100;
+            } else if (paramCount < argArray.length) {
+                // Truncation allowed but penalized
+                score = 50 - (argArray.length - paramCount) * 10;
+            } else {
+                // Padding allowed but heavily penalized (risky)
+                score = 20 - (paramCount - argArray.length) * 5;
+            }
+            
+            if (score < 0) continue; // Too simplistic mismatch
+
+            Object[] convertedArgs = new Object[paramCount];
+            boolean possible = true;
+
+            for (int i = 0; i < paramCount; i++) {
+                Object inputArg = (i < argArray.length) ? argArray[i] : null;
+                Class<?> targetType = paramTypes[i];
+                
+                if (inputArg == null) {
+                    if (targetType.isPrimitive()) {
+                        possible = false; // Cannot pass null to primitive
+                        break;
                     }
+                    convertedArgs[i] = null;
+                    continue;
+                }
+                
+                // Type Conversion Logic
+                if (targetType.isAssignableFrom(inputArg.getClass())) {
+                    convertedArgs[i] = inputArg;
+                    score += 10; // Perfect/Assignable match
+                } else if (targetType == String.class) {
+                    convertedArgs[i] = inputArg.toString(); // GString or Object to String
+                    score += 8;
+                } else if (Number.class.isAssignableFrom(targetType) && inputArg instanceof Number) {
+                    if (targetType == Long.class || targetType == long.class) {
+                        convertedArgs[i] = ((Number) inputArg).longValue();
+                    } else if (targetType == Integer.class || targetType == int.class) {
+                        convertedArgs[i] = ((Number) inputArg).intValue();
+                    } else if (targetType == Double.class || targetType == double.class) {
+                        convertedArgs[i] = ((Number) inputArg).doubleValue();
+                    } else {
+                        convertedArgs[i] = inputArg; 
+                    }
+                    score += 8;
+                } else if ((targetType == boolean.class || targetType == Boolean.class) && inputArg instanceof Boolean) {
+                    convertedArgs[i] = inputArg;
+                    score += 10;
+                } else {
+                    // Type mismatch
+                    possible = false;
+                    break;
                 }
             }
-        } catch (Exception e) {
-            log("  -> Fuzzy match invocation failed: " + e.getMessage());
+            
+            if (possible) {
+                if (score > bestScore) {
+                    bestScore = score;
+                    bestMethod = m;
+                    bestConvertedArgs = convertedArgs;
+                }
+            }
+        }
+
+        if (bestMethod != null) {
+             log("  -> Smart Match found: " + bestMethod.getName() + " (Score: " + bestScore + "). Invoking...");
+             try {
+                 return bestMethod.invoke(this, bestConvertedArgs);
+             } catch (Exception e) {
+                 log("  -> Smart Match invocation failed: " + e.getMessage());
+                 throw new RuntimeException("Error invoking smart-matched method " + name, e);
+             }
         }
 
         // Strategy 2: Forward to Playwright Context (Page or Frame)

@@ -43,6 +43,7 @@ API REFERENCE (DSL - variable 'web'):
 - `web.extractList(containerSelector, rowSelector, limit)`: **POWERFUL**. Scrolls, extracts, deduplicates, and resets to top. Returns `List<String>`.
 - `web.extractFirstPageRows(containerSelector, rowSelector, cellSelector)`: Returns first-page row texts joined by commas.
 - `web.extractFirstPageTable(containerSelector, rowSelector, columnsMap)`: Returns first-page structured rows.
+- `web.extractPagesTable(containerSelector, rowSelector, columnsMap, nextBtnSelector, maxPages)`: **POWERFUL**. Extracts data across multiple pages by clicking 'next' button.
 - `web.extractTableData(containerSelector, rowSelector, limit, columnsMap)`: **POWERFUL**. Extracts structured data while scrolling (for virtual tables). Returns `List<Map<String, String>>`.
 - `web.locateItem(containerSelector, rowSelector, textToFind)`: **POWERFUL**. Scrolls until item is found and visible. Returns `boolean`.
 - `page`: The raw Playwright Page/Frame object is still available if absolutely necessary, but PREFER `web` methods.
@@ -65,14 +66,20 @@ SECTION 1: INTERACTION
 - For flaky elements, set retries: `web.withMaxRetries(5)` or use `web.clickWithRetry('#selector')`.
 - Adjust timeouts if needed: `web.withDefaultTimeout(40000)`.
 
-SECTION 2: DYNAMIC LISTS & TABLES (Virtual Scrolling)
+SECTION 2: DYNAMIC LISTS, TABLES & PAGINATION
 Use high-level DSL methods. Avoid manual scroll loops and DOM re-reading after extraction.
 
 - **Row Text Output**: `web.extractFirstPageRows(containerSelector, rowSelector, cellSelector)` then output the returned list.
 - **Structured Output**: 
-  - For single page (or manual pagination): Use `web.extractFirstPageTable(containerSelector, rowSelector, columnsMap)`.
+  - For single page: Use `web.extractFirstPageTable(containerSelector, rowSelector, columnsMap)`.
   - For infinite scroll: Use `web.extractTableData(containerSelector, rowSelector, limit, columnsMap)`.
-  - IMPORTANT: `columnsMap` keys MUST be Strings (e.g. `["1": "sel"]`, NOT `[1: "sel"]`).
+  - **For Standard Pagination (Next Button)**: Use `web.extractPagesTable(containerSelector, rowSelector, columnsMap, nextBtnSelector, maxPages)`.
+    - `maxPages`: Max pages to scrape (e.g. 10). 
+    - `nextBtnSelector`: Selector for the 'Next' button.
+    - The method automatically handles clicking, waiting, and checking for disabled state.
+  - BEST PRACTICE: `columnsMap` keys MUST be the desired output field names (e.g., `"订单号"`, `"状态"`), and values MUST be relative selectors (e.g., `"td:nth-child(2)"`, `".status-label"`).
+  - If you only know column headers, map by header to selector using `td:nth-child(n)` after counting header positions.
+  - Avoid numeric keys like `"1"` unless you will read the same numeric keys in output.
   - **CRITICAL**: Use the RETURNED data list. Do NOT iterate the count and query `nth-child` again, as virtual rows may be unloaded.
 - **Locate Item**: `web.locateItem(containerSelector, rowSelector, textToFind)`.
  - Do NOT loop `waitFor` across `nth-of-type` cells. Do NOT wait for `.art-table-row:nth-of-type(...) .art-table-cell:nth-of-type(...)`.
