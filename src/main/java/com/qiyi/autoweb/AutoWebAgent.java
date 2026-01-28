@@ -23,8 +23,8 @@ public class AutoWebAgent {
             // Default example if no args provided
             String url = "https://sc.scm121.com/tradeManage/tower/distribute";
             String userPrompt = "请帮我查询“待发货”的订单。等表格加载出来后，" +
-                    "把第一页的每条记录整理成一行，用中文逗号分隔，并去掉换行；" +
-                    "同时输出页面底部显示的总记录数（比如“共xx条”）。" +
+                    "把第一页的每条记录整理成，用中文逗号分隔，内容中有回车换行的就去掉，然后逐行输出；" +
+                    "再输出页面底部显示的总记录数（比如“共xx条”）。" +
                     "最后选中第一页第一条记录，并点击“审核推单”。";
 
             System.out.println("No arguments provided. Running default example:");
@@ -44,6 +44,9 @@ public class AutoWebAgent {
                 } else if ("GEMINI".equals(upper) || "GEMINI_FLASH".equals(upper)) {
                     ACTIVE_MODEL = "GEMINI";
                     System.out.println("Using model: Gemini (remote)");
+                } else if ("MOONSHOT".equals(upper) || "MOONSHOT_MOONSHOT".equals(upper) || "MOONSHOT_V1".equals(upper)) {
+                    ACTIVE_MODEL = "MOONSHOT";
+                    System.out.println("Using model: Moonshot (remote)");
                 } else if ("OLLAMA_MODEL_QWEN3_8B".equals(upper)
                         || "OLLAMA_QWEN3_8B".equals(upper)
                         || "OLLAMA".equals(upper)
@@ -515,6 +518,7 @@ public class AutoWebAgent {
         modelCombo.addItem("DeepSeek");
         modelCombo.addItem("Qwen-Max");
         modelCombo.addItem("Minimax");
+        modelCombo.addItem("Moonshot");
         modelCombo.addItem("Gemini");
         modelCombo.addItem("Ollama Qwen3:8B");
         if ("QWEN_MAX".equals(ACTIVE_MODEL)) {
@@ -525,6 +529,8 @@ public class AutoWebAgent {
             modelCombo.setSelectedItem("Ollama Qwen3:8B");
         } else if ("MINIMAX".equals(ACTIVE_MODEL)) {
             modelCombo.setSelectedItem("Minimax");
+        } else if ("MOONSHOT".equals(ACTIVE_MODEL)) {
+            modelCombo.setSelectedItem("Moonshot");
         } else {
             modelCombo.setSelectedItem("DeepSeek");
         }
@@ -538,6 +544,8 @@ public class AutoWebAgent {
                 ACTIVE_MODEL = "OLLAMA_QWEN3_8B";
             } else if ("Minimax".equals(selected)) {
                 ACTIVE_MODEL = "MINIMAX";
+            } else if ("Moonshot".equals(selected)) {
+                ACTIVE_MODEL = "MOONSHOT";
             } else {
                 ACTIVE_MODEL = "DEEPSEEK";
             }
@@ -734,13 +742,25 @@ public class AutoWebAgent {
                     saveDebugArtifacts(freshHtml, freshCleanedHtml, null, uiLogger);
                     
                     // 2. Generate Code
-                    String code = generateGroovyScript(currentPrompt, freshCleanedHtml, uiLogger);
+                    String generatedCode = generateGroovyScript(currentPrompt, freshCleanedHtml, uiLogger);
+                    String normalizedCode = normalizeGeneratedGroovy(generatedCode);
+                    if (normalizedCode != null && !normalizedCode.equals(generatedCode)) {
+                        java.util.List<String> normalizeErrors = GroovyLinter.check(normalizedCode);
+                        boolean hasSyntaxIssue = normalizeErrors.stream().anyMatch(e2 -> e2.startsWith("Syntax Error") || e2.startsWith("Parse Error"));
+                        if (!hasSyntaxIssue) {
+                            uiLogger.accept("已自动规范化表格提取逻辑。");
+                            generatedCode = normalizedCode;
+                        } else {
+                            uiLogger.accept("规范化后语法校验失败，已回退到原始生成代码。");
+                        }
+                    }
                     
                     // Save generated code to debug file
-                    saveDebugArtifacts(null, null, code, uiLogger);
+                    saveDebugArtifacts(null, null, generatedCode, uiLogger);
+                    String finalCode = generatedCode;
 
                     SwingUtilities.invokeLater(() -> {
-                        codeArea.setText(code);
+                        codeArea.setText(finalCode);
                         btnGetCode.setEnabled(true);
                         btnRefine.setEnabled(true);
                         btnExecute.setEnabled(true);
@@ -813,6 +833,17 @@ public class AutoWebAgent {
                         uiLogger
                     );
 
+                    String normalizedRefined = normalizeGeneratedGroovy(refinedCode);
+                    if (normalizedRefined != null && !normalizedRefined.equals(refinedCode)) {
+                        java.util.List<String> normalizeErrors = GroovyLinter.check(normalizedRefined);
+                        boolean hasSyntaxIssue = normalizeErrors.stream().anyMatch(e2 -> e2.startsWith("Syntax Error") || e2.startsWith("Parse Error"));
+                        if (!hasSyntaxIssue) {
+                            uiLogger.accept("已自动规范化表格提取逻辑。");
+                            refinedCode = normalizedRefined;
+                        } else {
+                            uiLogger.accept("规范化后语法校验失败，已回退到原始生成代码。");
+                        }
+                    }
                     String finalRefinedCode = refinedCode;
                     
                     // Save refined code to debug file
@@ -943,6 +974,14 @@ public class AutoWebAgent {
                     }
                 }
                 break;
+            case "MOONSHOT":
+                code = callLLMWithTimeout(() -> LLMUtil.chatWithMoonshot(prompt), 180000L, uiLogger, "Moonshot");
+                if (code == null || code.trim().isEmpty()) {
+                    if (uiLogger != null) {
+                        uiLogger.accept("Moonshot 调用未返回结果或发生错误。");
+                    }
+                }
+                break;
             case "GEMINI":
                 code = callLLMWithTimeout(() -> LLMUtil.chatWithGemini(prompt), 180000L, uiLogger, "Gemini");
                 if (code == null || code.trim().isEmpty()) {
@@ -1012,6 +1051,63 @@ public class AutoWebAgent {
 
         return callActiveModel(prompt, uiLogger);
     }
+    
+    private static String normalizeGeneratedGroovy(String code) {
+        if (code == null) return null;
+        String normalized = code;
+        normalized = normalized.replaceAll("(?m)^(\\s*)(PLAN:|THINK:|ANALYSIS:|REASONING:|思考过程|计划)\\b", "$1// $2");
+        normalized = normalized.replaceAll("(?m)^(\\s*)(-\\s*[Pp]lan\\b.*)", "$1// $2");
+        normalized = normalized.replaceAll("(?m)^(\\s*)(\\*\\s*[Pp]lan\\b.*)", "$1// $2");
+        normalized = normalized.replaceAll("(?m)^(\\s*)(\\[Plan\\].*)", "$1// $2");
+        normalized = normalized.replaceAll("(?m)^(\\s*)(<plan>.*)</plan>\\s*$", "$1// $2");
+        normalized = normalized.replaceAll("(?m)^(\\s*)(<think>.*)</think>\\s*$", "$1// $2");
+        normalized = normalized.replaceAll("(?m)^(\\s*)(思考:.*)", "$1// $2");
+
+        boolean applyNormalization =
+                normalized.contains("web.extractList(") ||
+                normalized.matches("(?s).*\\browCount\\b\\s*=\\s*web\\.count\\(.*") ||
+                normalized.contains("rowTexts") ||
+                normalized.contains("joinedRow");
+        if (applyNormalization) {
+            String replacement = "def rows = web.extractFirstPageRows(containerSelector, rowSelector, cellSelector)\n" +
+                    "rows.each { row -> web.log(row) }\n";
+            java.util.regex.Pattern blockPatternA = java.util.regex.Pattern.compile(
+                    "(?s)def\\s+rowCount\\s*=\\s*web\\.count\\([^\\n]*\\).*?allRowsOutput\\.each\\s*\\{.*?\\}\\s*"
+            );
+            java.util.regex.Pattern blockPatternB = java.util.regex.Pattern.compile(
+                    "(?s)def\\s+rowCount\\s*=\\s*web\\.count\\([^\\n]*\\).*?(?=def\\s+totalCountText|def\\s+totalText|web\\.getText\\()"
+            );
+            normalized = blockPatternA.matcher(normalized).replaceAll(replacement);
+            normalized = blockPatternB.matcher(normalized).replaceAll(replacement);
+            normalized = normalized.replaceAll("(?s)def\\s+rowTexts\\s*=\\s*\\[\\].*?def\\s+joinedRow\\s*=.*?web\\.log\\(joinedRow\\).*?(?=def\\s+totalCountText|def\\s+totalText|web\\.getText\\()", "");
+            normalized = normalized.replaceAll("(?s)int\\s+rowCount\\s*=\\s*web\\.count\\([^\\n]*\\).*?for\\s*\\(\\s*int\\s+i\\s*=\\s*0;.*?\\)\\s*\\{.*?web\\.log\\(joinedRow\\)\\s*;?\\s*\\}.*?(?=def\\s+totalCountText|def\\s+totalText|web\\.getText\\()", replacement);
+            
+            java.util.regex.Pattern getTextLogAssignPattern = java.util.regex.Pattern.compile("(?s)(?:String|def|var)?\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*=\\s*web\\.getText\\((\"|')(.*?)\\2\\)\\s*\\n\\s*web\\.log\\(\\1\\)");
+            java.util.regex.Matcher getTextLogAssignMatcher = getTextLogAssignPattern.matcher(normalized);
+            StringBuffer getTextLogAssignBuffer = new StringBuffer();
+            while (getTextLogAssignMatcher.find()) {
+                String varName = getTextLogAssignMatcher.group(1);
+                String sel = getTextLogAssignMatcher.group(3);
+                String replacementBlock = "def " + varName + " = web.getText(\"" + sel.replace("\"", "\\\"") + "\")\nweb.log(" + varName + ")";
+                getTextLogAssignMatcher.appendReplacement(getTextLogAssignBuffer, java.util.regex.Matcher.quoteReplacement(replacementBlock));
+            }
+            getTextLogAssignMatcher.appendTail(getTextLogAssignBuffer);
+            normalized = getTextLogAssignBuffer.toString();
+            
+            java.util.regex.Pattern getTextLogPattern = java.util.regex.Pattern.compile("(?s)web\\.getText\\((\"|')(.*?)\\1\\)\\s*\\n\\s*web\\.log\\(([^\\)]+)\\)");
+            java.util.regex.Matcher getTextLogMatcher = getTextLogPattern.matcher(normalized);
+            StringBuffer getTextLogBuffer = new StringBuffer();
+            while (getTextLogMatcher.find()) {
+                String sel = getTextLogMatcher.group(2);
+                String varName = getTextLogMatcher.group(3).trim();
+                String replacementBlock = "def " + varName + " = web.getText(\"" + sel.replace("\"", "\\\"") + "\")\nweb.log(" + varName + ")";
+                getTextLogMatcher.appendReplacement(getTextLogBuffer, java.util.regex.Matcher.quoteReplacement(replacementBlock));
+            }
+            getTextLogMatcher.appendTail(getTextLogBuffer);
+            normalized = getTextLogBuffer.toString();
+        }
+        return normalized;
+    }
 
     private static void executeWithGroovy(String scriptCode, Object pageOrFrame, java.util.function.Consumer<String> logger) throws Exception {
         // 1. Static Linting
@@ -1025,8 +1121,9 @@ public class AutoWebAgent {
             
             // Abort on security violations
             boolean hasSecurityError = lintErrors.stream().anyMatch(e -> e.startsWith("Security Error"));
-            if (hasSecurityError) {
-                 throw new RuntimeException("Execution aborted due to security violations.");
+            boolean hasSyntaxError = lintErrors.stream().anyMatch(e -> e.startsWith("Syntax Error") || e.startsWith("Parse Error"));
+            if (hasSecurityError || hasSyntaxError) {
+                 throw new RuntimeException("Execution aborted due to static analysis violations.");
             }
         }
 

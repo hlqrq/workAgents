@@ -60,7 +60,8 @@ public class LLMUtil {
         ALIYUN,
         ALIYUN_VL,
         OLLAMA, // Added Ollama support
-        MINIMAX
+        MINIMAX,
+        MOONSHOT
     }
 
     public static final String OLLAMA_HOST = "http://localhost:11434";
@@ -95,6 +96,61 @@ public class LLMUtil {
             return result.getOutput().getChoices().get(0).getMessage().getContent();
         } catch (ApiException | NoApiKeyException | InputRequiredException e) {
             System.err.println("Alibaba Cloud Chat Error: " + e.getMessage());
+            e.printStackTrace();
+            return "";
+        }
+    }
+    
+    // --- Moonshot (月之暗面, OpenAI-compatible) ---
+    public static String chatWithMoonshot(String prompt) {
+        String apiKey = AppConfig.getInstance().getMoonshotApiKey();
+        if (apiKey == null || apiKey.trim().isEmpty()) {
+            System.err.println("Moonshot API Key is missing!");
+            return "";
+        }
+        try {
+            String thinkingType = AppConfig.getInstance().getMoonshotThinking();
+            if (thinkingType == null || thinkingType.trim().isEmpty()) {
+                thinkingType = "disabled";
+            }
+            java.util.Map<String, Object> message = new java.util.HashMap<>();
+            message.put("role", "user");
+            message.put("content", prompt);
+            
+            java.util.Map<String, Object> payload = new java.util.HashMap<>();
+            payload.put("model", "kimi-k2.5");
+            payload.put("messages", java.util.List.of(message));
+            payload.put("stream", false);
+            java.util.Map<String, Object> thinking = new java.util.HashMap<>();
+            thinking.put("type", thinkingType);
+            payload.put("thinking", thinking);
+            
+            String jsonBody = com.alibaba.fastjson2.JSON.toJSONString(payload);
+            java.net.http.HttpClient client = java.net.http.HttpClient.newHttpClient();
+            java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
+                    .uri(java.net.URI.create("https://api.moonshot.cn/v1/chat/completions"))
+                    .header("Content-Type", "application/json")
+                    .header("Authorization", "Bearer " + apiKey)
+                    .POST(java.net.http.HttpRequest.BodyPublishers.ofString(jsonBody))
+                    .build();
+            java.net.http.HttpResponse<String> response = client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() >= 200 && response.statusCode() < 300) {
+                com.alibaba.fastjson2.JSONObject json = com.alibaba.fastjson2.JSONObject.parseObject(response.body());
+                com.alibaba.fastjson2.JSONArray choices = json.getJSONArray("choices");
+                if (choices != null && !choices.isEmpty()) {
+                    com.alibaba.fastjson2.JSONObject first = choices.getJSONObject(0);
+                    com.alibaba.fastjson2.JSONObject msg = first.getJSONObject("message");
+                    if (msg != null) {
+                        return msg.getString("content");
+                    }
+                }
+                return "";
+            } else {
+                System.err.println("Moonshot Chat Error: HTTP " + response.statusCode() + " - " + response.body());
+                return "";
+            }
+        } catch (Exception e) {
+            System.err.println("Moonshot Chat Error: " + e.getMessage());
             e.printStackTrace();
             return "";
         }

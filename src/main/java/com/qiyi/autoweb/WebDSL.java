@@ -7,7 +7,7 @@ import java.util.List;
 import java.util.function.Consumer;
 
 /**
- * A High-level DSL wrapper for Playwright to simplify LLM-generated scripts
+ * A High-level DSL (Domain-Specific Language) wrapper for Playwright to simplify LLM-generated scripts
  * and reduce hallucination/errors.
  */
 public class WebDSL {
@@ -95,9 +95,14 @@ public class WebDSL {
     public void click(String selector) {
         log("Action: Click '" + selector + "'");
         retry(() -> {
+            Locator loc = locator(selector).first();
+            if (loc.count() > 0 && !loc.isVisible()) {
+                loc.evaluate("el => { const label = el.closest('label'); if (label) { label.click(); return; } if (el.parentElement) { el.parentElement.click(); return; } el.click(); }");
+                return;
+            }
             waitFor(selector);
-            highlight(selector);
-            locator(selector).first().click();
+            highlight(loc);
+            loc.click();
         }, "click " + selector);
     }
     
@@ -122,18 +127,28 @@ public class WebDSL {
     public void check(String selector) {
         log("Action: Check '" + selector + "'");
         retry(() -> {
-            waitFor(selector);
-            highlight(selector);
-            locator(selector).first().check();
+            Locator loc = locator(selector).first();
+            if (loc.isVisible()) {
+                waitFor(selector);
+                highlight(loc);
+                loc.check();
+            } else {
+                loc.evaluate("el => { const label = el.closest('label'); if (label) { label.click(); return; } if (el.parentElement) el.parentElement.click(); }");
+            }
         }, "check " + selector);
     }
     
     public void uncheck(String selector) {
         log("Action: Uncheck '" + selector + "'");
         retry(() -> {
-            waitFor(selector);
-            highlight(selector);
-            locator(selector).first().uncheck();
+            Locator loc = locator(selector).first();
+            if (loc.isVisible()) {
+                waitFor(selector);
+                highlight(loc);
+                loc.uncheck();
+            } else {
+                loc.evaluate("el => { const label = el.closest('label'); if (label) { label.click(); return; } if (el.parentElement) el.parentElement.click(); }");
+            }
         }, "uncheck " + selector);
     }
     
@@ -208,7 +223,17 @@ public class WebDSL {
 
     public void waitFor(String selector) {
         log("Wait: For element '" + selector + "'");
-        locator(selector).first().waitFor(new Locator.WaitForOptions().setTimeout(defaultTimeout));
+        Locator loc = locator(selector).first();
+        try {
+            boolean isCheckboxSelector = selector.contains("checkbox") || selector.contains("ant-checkbox-input");
+            if (isCheckboxSelector && loc.count() > 0 && !loc.isVisible()) {
+                loc.waitFor(new Locator.WaitForOptions()
+                        .setTimeout(defaultTimeout)
+                        .setState(com.microsoft.playwright.options.WaitForSelectorState.ATTACHED));
+                return;
+            }
+        } catch (Exception ignored) {}
+        loc.waitFor(new Locator.WaitForOptions().setTimeout(defaultTimeout));
     }
     
     public void wait(int millis) {
@@ -319,6 +344,15 @@ public class WebDSL {
         }
     }
     
+    private void writeDebugFile(String fileName, List<String> lines) {
+        try {
+            java.nio.file.Path dir = java.nio.file.Paths.get(System.getProperty("user.dir"), "autoweb", "debug");
+            java.nio.file.Files.createDirectories(dir);
+            java.nio.file.Path path = dir.resolve(fileName);
+            java.nio.file.Files.write(path, lines, java.nio.charset.StandardCharsets.UTF_8);
+        } catch (Exception ignored) {}
+    }
+    
     public int getTotalCount() {
         try {
             String txt = getText(".ant-pagination-total-text");
@@ -368,6 +402,27 @@ public class WebDSL {
         return -1;
     }
     
+    public int resolvePageSize() {
+        int size = getPageSize();
+        if (size < 1) {
+            int total = getTotalCount();
+            if (total > 0) size = total;
+        }
+        return size;
+    }
+    
+    public List<String> extractFirstPageRows(String containerSelector, String rowSelector, String cellSelector) {
+        int size = resolvePageSize();
+        if (size < 1) size = -1;
+        return extractRowTexts(containerSelector, rowSelector, cellSelector, size);
+    }
+    
+    public List<java.util.Map<String, String>> extractFirstPageTable(String containerSelector, String rowSelector, java.util.Map<String, String> columns) {
+        int size = resolvePageSize();
+        if (size < 1) size = -1;
+        return extractTableData(containerSelector, rowSelector, size, columns);
+    }
+    
     private boolean isScrollable(String selector) {
         try {
             Object v = locator(selector).first().evaluate("el => (el.scrollHeight - el.clientHeight) > 2");
@@ -376,9 +431,80 @@ public class WebDSL {
         return false;
     }
     
+    private Locator getRowsInContainer(String containerSelector, String rowSelector) {
+        try {
+            if (containerSelector != null && !containerSelector.trim().isEmpty()) {
+                Locator containers = locator(containerSelector);
+                int c = containers.count();
+                for (int i = 0; i < c; i++) {
+                    Locator container = containers.nth(i);
+                    try {
+                        if (!container.isVisible()) continue;
+                    } catch (Exception ignored) {}
+                    Locator rows = container.locator(rowSelector);
+                    if (rows.count() > 0) {
+                        return rows;
+                    }
+                }
+                if (c > 0) {
+                    return containers.first().locator(rowSelector);
+                }
+            }
+        } catch (Exception ignored) {}
+        return locator(rowSelector);
+    }
+    
     private String ensureScrollableContainer(String containerSelector, String rowSelector) {
-        if (containerSelector != null && isScrollable(containerSelector)) {
-            return containerSelector;
+        if (containerSelector != null && !containerSelector.trim().isEmpty()) {
+            try {
+                Locator containers = locator(containerSelector);
+                int c = containers.count();
+                for (int i = 0; i < c; i++) {
+                    Locator container = containers.nth(i);
+                    try {
+                        if (!container.isVisible()) continue;
+                    } catch (Exception ignored) {}
+                    boolean scrollable = false;
+                    try {
+                        Object v = container.evaluate("el => (el.scrollHeight - el.clientHeight) > 2");
+                        if (v instanceof Boolean) scrollable = (Boolean) v;
+                    } catch (Exception ignored) {}
+                    if (scrollable) {
+                        container.evaluate("el => el.setAttribute('data-webdsl-scroll-target','1')");
+                        return "[data-webdsl-scroll-target='1']";
+                    }
+                }
+                for (int i = 0; i < c; i++) {
+                    Locator container = containers.nth(i);
+                    try {
+                        if (!container.isVisible()) continue;
+                    } catch (Exception ignored) {}
+                    Locator rowsInContainer = container.locator(rowSelector);
+                    if (rowsInContainer.count() == 0) continue;
+                    try {
+                        rowsInContainer.first().evaluate("el => { " +
+                                "let p = el.parentElement; " +
+                                "while (p) { " +
+                                "  const sh = p.scrollHeight; const ch = p.clientHeight; " +
+                                "  if ((sh - ch) > 2) { " +
+                                "    p.setAttribute('data-webdsl-scroll-target','1'); " +
+                                "    return true; " +
+                                "  } " +
+                                "  p = p.parentElement; " +
+                                "} " +
+                                "return false; " +
+                                "}");
+                        Locator detected = locator("[data-webdsl-scroll-target='1']").first();
+                        if (detected != null && detected.count() > 0) {
+                            log("Action: Detected scrollable container via ancestor search");
+                            return "[data-webdsl-scroll-target='1']";
+                        }
+                    } catch (Exception ignored) {}
+                }
+            } catch (Exception ignored) {}
+            if (isScrollable(containerSelector)) {
+                return containerSelector;
+            }
         }
         // Try to detect scrollable ancestor of the first row
         try {
@@ -594,7 +720,7 @@ public class WebDSL {
         wait(300);
 
         for (int i = 0; i < maxScrolls; i++) {
-            Locator rows = locator(rowSelector);
+            Locator rows = getRowsInContainer(containerSelector, rowSelector);
             int count = rows.count();
             boolean foundNew = false;
             
@@ -687,7 +813,7 @@ public class WebDSL {
         int wheelStep = 800;
         
         for (int i = 0; i < maxScrolls; i++) {
-            Locator rows = locator(rowSelector);
+            Locator rows = getRowsInContainer(containerSelector, rowSelector);
             int count = rows.count();
             boolean foundNew = false;
             
@@ -789,6 +915,22 @@ public class WebDSL {
         
         java.util.Set<String> processedKeys = new java.util.HashSet<>();
         List<String> results = new java.util.ArrayList<>();
+        List<String> debug = new java.util.ArrayList<>();
+        debug.add("start=" + java.time.LocalDateTime.now());
+        debug.add("container=" + containerSelector);
+        debug.add("rowSelector=" + rowSelector);
+        debug.add("cellSelector=" + cellSelector);
+        debug.add("limit=" + limit);
+        try {
+            int rowsInContainer = getRowsInContainer(containerSelector, rowSelector).count();
+            debug.add("rowsInContainer(start)=" + rowsInContainer);
+            if (rowsInContainer > 0) {
+                Locator firstRow = getRowsInContainer(containerSelector, rowSelector).first();
+                String firstText = "";
+                try { firstText = normalizeText(firstRow.innerText()); } catch (Exception ignored) {}
+                debug.add("firstRow(start)=" + firstText);
+            }
+        } catch (Exception ignored) {}
         
         ensureAtTop(containerSelector);
         wait(300);
@@ -799,9 +941,10 @@ public class WebDSL {
         int wheelStep = 800;
         
         for (int i = 0; i < maxScrolls; i++) {
-            Locator rows = locator(rowSelector);
+            Locator rows = getRowsInContainer(containerSelector, rowSelector);
             int count = rows.count();
             boolean foundNew = false;
+            debug.add("scroll=" + i + " visibleRows=" + count);
             
             for (int j = 0; j < count; j++) {
                 Locator row = rows.nth(j);
@@ -817,11 +960,23 @@ public class WebDSL {
                 } catch (Exception ignored) {}
                 
                 String joined = String.join("，", cells);
-                String key = md5(joined);
+                String key;
+                String head = cells.isEmpty() ? "" : cells.get(0);
+                if (!head.isEmpty() && head.matches("\\d+")) {
+                    key = "idx:" + head;
+                } else {
+                    String keySource = joined;
+                    if (!cells.isEmpty()) {
+                        int keyCount = Math.min(3, cells.size());
+                        keySource = String.join("，", cells.subList(0, keyCount));
+                    }
+                    key = "md5:" + md5(keySource);
+                }
                 if (!joined.isEmpty() && !processedKeys.contains(key)) {
                     processedKeys.add(key);
                     results.add(joined);
                     foundNew = true;
+                    debug.add("add index=" + results.size() + " rowIndex=" + j + " key=" + key + " head=" + head);
                     if (limit > 0 && results.size() >= limit) {
                         break;
                     }
@@ -841,10 +996,12 @@ public class WebDSL {
             }
             
             if (isAtBottom(containerSelector)) break;
-            scrollBy(containerSelector, scrollStep);
+            int adaptiveStep = (count <= 3) ? 120 : scrollStep;
+            int adaptiveWheel = (count <= 3) ? 200 : wheelStep;
+            scrollBy(containerSelector, adaptiveStep);
             wait(500);
             hover(containerSelector);
-            page.mouse().wheel(0, wheelStep);
+            page.mouse().wheel(0, adaptiveWheel);
             wait(500);
             
             if (!foundNew) {
@@ -858,6 +1015,18 @@ public class WebDSL {
         
         ensureAtTop(containerSelector);
         wait(300);
+        try {
+            int rowsInContainer = getRowsInContainer(containerSelector, rowSelector).count();
+            debug.add("rowsInContainer(end)=" + rowsInContainer);
+            if (rowsInContainer > 0) {
+                Locator firstRow = getRowsInContainer(containerSelector, rowSelector).first();
+                String firstText = "";
+                try { firstText = normalizeText(firstRow.innerText()); } catch (Exception ignored) {}
+                debug.add("firstRow(end)=" + firstText);
+            }
+        } catch (Exception ignored) {}
+        debug.add("total=" + results.size());
+        writeDebugFile("table_extract_debug.txt", debug);
         log("  -> Extracted " + results.size() + " row texts.");
         return results;
     }
@@ -881,7 +1050,7 @@ public class WebDSL {
         int maxScrolls = 50;
 
         for (int i = 0; i < maxScrolls; i++) {
-            Locator rows = locator(rowSelector);
+            Locator rows = getRowsInContainer(containerSelector, rowSelector);
             int count = rows.count();
             
             // Search in current view

@@ -9,14 +9,11 @@ GLOBAL PRINCIPLES:
 - **Two-Stage Process**: 
   1. Analyze the User Task and HTML. Create a detailed "Step-by-Step Plan".
   2. Generate the Groovy code based on the plan.
+  - All non-code commentary (Plan, reasoning, notes) MUST be output as Groovy line comments starting with `//`. Do NOT output bare text that could break code execution.
 - **Variable Rule**: Do NOT redeclare variables.
 - **Waiting**: The DSL handles basic waiting, but be mindful of logical flow.
 - **No Translation**: Do NOT translate keywords from the User Task into other languages. Use them exactly as they appear in the task or HTML.
 - **Text Priority**: When the user provides a visible keyword (e.g., button name, label), ALWAYS prefer locating it by that exact text (e.g., `text='待发货'`) over internal IDs or inferred English values, unless the text is ambiguous.
-- **Hidden Inputs**: In modern UI frameworks (like Ant Design), `input` elements are often hidden (e.g. `display:none` or `opacity:0`). 
-  - **CRITICAL**: Do NOT click/check the `input` element itself, as it will cause a timeout.
-  - **SOLUTION**: Click the visible PARENT or SIBLING element (usually a `<label>`, `<span>`, or `<div>`).
-  - Example: Instead of `web.click('input[type="checkbox"]')`, use `web.click('label:has(input[type="checkbox"])')` or just `web.click('text="Visible Label"')`.
 
 API REFERENCE (DSL - variable 'web'):
 - `web.click(selector)`: Clicks an element. High-level wrapper for `locator(selector).first().click()`.
@@ -42,6 +39,8 @@ API REFERENCE (DSL - variable 'web'):
 - `web.log(msg)`: Prints message to UI log.
 - `web.findRowIndex(rowSelector, cellText)`: Returns index of row containing text.
 - `web.extractList(containerSelector, rowSelector, limit)`: **POWERFUL**. Scrolls, extracts, deduplicates, and resets to top. Returns `List<String>`.
+- `web.extractFirstPageRows(containerSelector, rowSelector, cellSelector)`: Returns first-page row texts joined by commas.
+- `web.extractFirstPageTable(containerSelector, rowSelector, columnsMap)`: Returns first-page structured rows.
 - `web.locateItem(containerSelector, rowSelector, textToFind)`: **POWERFUL**. Scrolls until item is found and visible. Returns `boolean`.
 - `page`: The raw Playwright Page/Frame object is still available if absolutely necessary, but PREFER `web` methods.
 
@@ -64,58 +63,20 @@ SECTION 1: INTERACTION
 - Adjust timeouts if needed: `web.withDefaultTimeout(40000)`.
 
 SECTION 2: DYNAMIC LISTS & TABLES (Virtual Scrolling)
-**CRITICAL**: For lists that load dynamically or use virtual scrolling (e.g., `.art-table`), use the provided **High-Level APIs** instead of writing manual scroll loops.
+Use high-level DSL methods. Avoid manual scroll loops and DOM re-reading after extraction.
 
-- **Simple Extraction (Text Only)**: Use `web.extractList(containerSelector, rowSelector, limit)`.
-  - Example: `List<String> rawRows = web.extractList('.art-table-body', '.art-table-row', 100)`
-  - Before extraction, detect the per-page size via `int pageSize = web.getPageSize(); if (pageSize < 1) pageSize = Math.min(web.getTotalCount(), 200);` and pass `pageSize` as `limit`. Do NOT hardcode numeric page sizes.
-  - Output MUST be based on `rawRows` returned by `extractList`. Do NOT re-count DOM rows and do NOT read cells via `nth-child` after extraction.
-  - If you must output comma-joined cell texts, use `web.extractRowTexts(containerSelector, rowSelector, cellSelector, pageSize)` and output the returned list.
-
-- **Detailed Extraction (Structured Data)**: Use `web.extractTableData(containerSelector, rowSelector, limit, columnsMap)`.
-  - **CRITICAL**: Do NOT iterate over rows using `nth-child` indices after extraction. Virtual lists do not support random access by index after scrolling.
-  - Example:
-    ```groovy
-    Map<String, String> columns = [
-        "OrderNo": "td:nth-child(2)", 
-        "Status": ".status-label"
-    ]
-    int pageSize = web.getPageSize()
-    if (pageSize < 1) pageSize = Math.min(web.getTotalCount(), 200)
-    List<Map<String, String>> data = web.extractTableData('.art-table-body', '.art-table-row', pageSize, columns)
-    ```
-  - Output MUST be generated from `data` returned by `extractTableData`. Do NOT re-read DOM rows after extraction.
-  - If the list stops too early, switch container selector to the nearest scrollable ancestor (e.g., `.art-table-body > .art-table-body-inner`), and retry.
-  - Do NOT use `:visible` or count visible rows to infer full page size on virtual lists.
-  - Do NOT fall back to re-counting `.art-table-row` after extraction; rely on the data returned by extraction API itself (it already deduplicates and resets to top).
-  - **Page Size**: MUST detect the per-page size from the UI (e.g., pagination "xx 条/页"). Do NOT hardcode 50/100 in code or prompts. Use `web.getPageSize()` to read it.
-
-- **Finding & Interacting with Specific Item**: Use `web.locateItem(containerSelector, rowSelector, textToFind)`.
-  - It scrolls until it finds the item and makes it visible.
-  - Example:
-    ```groovy
-    if (web.locateItem('.art-table-body', '.art-table-row', 'Order_123')) {
-        web.log("Found order, clicking detail...")
-        // Click button in the now-visible row
-        web.clickButton('Detail') 
-    }
-    ```
-
-- **Selecting First Item**:
-  - Since `extractList` automatically resets to top, you can simply select the first visible row afterwards.
-  - Example:
-    ```groovy
-    web.extractList(...) 
-    // Now at top
-    web.log("Selecting first item...")
-    web.click('.art-table-row:nth-child(1) input[type="checkbox"]')
-    ```
+- **Row Text Output**: `web.extractFirstPageRows(containerSelector, rowSelector, cellSelector)` then output the returned list.
+- **Structured Output**: `web.extractFirstPageTable(containerSelector, rowSelector, columnsMap)` then format using the returned data.
+- **Locate Item**: `web.locateItem(containerSelector, rowSelector, textToFind)`.
+ - Do NOT loop `waitFor` across `nth-of-type` cells. Do NOT wait for `.art-table-row:nth-of-type(...) .art-table-cell:nth-of-type(...)`.
+ - When outputting rows, log each row separately (one `web.log` per row). Do NOT join all rows into a single line.
 
 SECTION 3: SELECTORS
 - Use specific IDs or Classes found in the HTML.
 - Do NOT guess prefixes (like .ant-, .el-). Only use what you see.
 - **Text Priority**: If the User Task refers to an element by text (e.g. "待发货"), PREFER selectors that use that text (e.g. `text='待发货'` or `:has-text('待发货')`). Avoid using obscure internal values (like `value="WaitOuterSent"`) unless necessary for uniqueness.
 - For table cells, PREFER CSS `:nth-child()` combined with a per-row selector (e.g., `".art-table-row:nth-child(i+1) td:nth-child(3)"`) instead of long `>> nth=` pipelines, which are more fragile.
- - Do NOT rely on `nth-child` random access after scrolling extraction. Use `web.extractTableData(...)` to capture values during scrolling.
+ - Do NOT wait for hidden inputs to be visible; click the label or parent (the DSL handles this).
+ - Do NOT include hidden `input` in selectors like `label ... input`. Click the label itself.
 
 Output ONLY valid Groovy code (including the Plan comments).
