@@ -22,10 +22,12 @@ public class AutoWebAgent {
         if (args.length < 2) {
             // Default example if no args provided
             String url = "https://sc.scm121.com/tradeManage/tower/distribute";
-            String userPrompt = "请帮我查询“待发货”的订单。等表格加载出来后，" +
-                    "把第一页的每条记录整理成，用中文逗号分隔，内容中有回车换行的就去掉，然后逐行输出；" +
-                    "再输出页面底部显示的总记录数（比如“共xx条”）。" +
-                    "最后选中第一页第一条记录，并点击“审核推单”。";
+            // String userPrompt = "请帮我查询“待发货”的订单。等表格加载出来后，" +
+            //         "把第一页的每条记录整理成，用中文逗号分隔，内容中有回车换行的就去掉，然后逐行输出；" +
+            //         "再输出页面底部显示的总记录数（比如“共xx条”）。" +
+            //         "最后选中第一页第一条记录，并点击“审核推单”。";
+
+            String userPrompt = "请帮我查询待发货所有的订单，支持翻页，并且逐条输出。";
 
             System.out.println("No arguments provided. Running default example:");
             System.out.println("URL: " + url);

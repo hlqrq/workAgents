@@ -6,6 +6,8 @@ Target HTML (cleaned snapshot of the current page/frame):
 
 GLOBAL PRINCIPLES:
 - **Optimization Goal**: Generate robust, semantic code using the provided DSL.
+- **Language**: All non-code commentary (Plan, reasoning, notes) and `web.log()` messages SHOULD be in Chinese.
+- **Safety Rule**: 禁止使用 while(true) 或无限循环；使用有界循环或 DSL 的 extractTableData/locateItem/withMaxRetries 等。
 - **Two-Stage Process**: 
   1. Analyze the User Task and HTML. Create a detailed "Step-by-Step Plan".
   2. Generate the Groovy code based on the plan.
@@ -41,6 +43,7 @@ API REFERENCE (DSL - variable 'web'):
 - `web.extractList(containerSelector, rowSelector, limit)`: **POWERFUL**. Scrolls, extracts, deduplicates, and resets to top. Returns `List<String>`.
 - `web.extractFirstPageRows(containerSelector, rowSelector, cellSelector)`: Returns first-page row texts joined by commas.
 - `web.extractFirstPageTable(containerSelector, rowSelector, columnsMap)`: Returns first-page structured rows.
+- `web.extractTableData(containerSelector, rowSelector, limit, columnsMap)`: **POWERFUL**. Extracts structured data while scrolling (for virtual tables). Returns `List<Map<String, String>>`.
 - `web.locateItem(containerSelector, rowSelector, textToFind)`: **POWERFUL**. Scrolls until item is found and visible. Returns `boolean`.
 - `page`: The raw Playwright Page/Frame object is still available if absolutely necessary, but PREFER `web` methods.
 
@@ -66,8 +69,11 @@ SECTION 2: DYNAMIC LISTS & TABLES (Virtual Scrolling)
 Use high-level DSL methods. Avoid manual scroll loops and DOM re-reading after extraction.
 
 - **Row Text Output**: `web.extractFirstPageRows(containerSelector, rowSelector, cellSelector)` then output the returned list.
-- **Structured Output**: `web.extractFirstPageTable(containerSelector, rowSelector, columnsMap)`.
+- **Structured Output**: 
+  - For single page (or manual pagination): Use `web.extractFirstPageTable(containerSelector, rowSelector, columnsMap)`.
+  - For infinite scroll: Use `web.extractTableData(containerSelector, rowSelector, limit, columnsMap)`.
   - IMPORTANT: `columnsMap` keys MUST be Strings (e.g. `["1": "sel"]`, NOT `[1: "sel"]`).
+  - **CRITICAL**: Use the RETURNED data list. Do NOT iterate the count and query `nth-child` again, as virtual rows may be unloaded.
 - **Locate Item**: `web.locateItem(containerSelector, rowSelector, textToFind)`.
  - Do NOT loop `waitFor` across `nth-of-type` cells. Do NOT wait for `.art-table-row:nth-of-type(...) .art-table-cell:nth-of-type(...)`.
  - When outputting rows, log each row separately (one `web.log` per row). Do NOT join all rows into a single line.

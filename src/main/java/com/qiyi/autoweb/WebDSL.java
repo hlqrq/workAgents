@@ -725,10 +725,11 @@ public class WebDSL {
             boolean foundNew = false;
             
             for (int j = 0; j < count; j++) {
+                Locator row = rows.nth(j);
                 String text = "";
-                try { text = rows.nth(j).innerText(); } catch (Exception ignored) {}
+                try { text = row.innerText(); } catch (Exception ignored) {}
                 String normalized = normalizeText(text);
-                String key = md5(normalized);
+                String key = buildStableRowKey(row, normalized);
                 if (!normalized.isEmpty() && !processed.contains(key)) {
                     processed.add(key);
                     results.add(normalized);
@@ -761,9 +762,6 @@ public class WebDSL {
             // 1) element scroll
             scrollBy(containerSelector, scrollStep);
             wait(500);
-            // 2) wheel scroll to trigger virtual renderers
-            hover(containerSelector);
-            page.mouse().wheel(0, wheelStep);
             wait(500);
             
             // Escalate steps if no new data is found
@@ -826,7 +824,7 @@ public class WebDSL {
                 if (normalized.isEmpty()) {
                     continue;
                 }
-                String rowKey = md5(normalized);
+                String rowKey = buildStableRowKey(row, normalized);
                 if (processedKeys.contains(rowKey)) {
                     continue;
                 }
@@ -880,9 +878,6 @@ public class WebDSL {
             // 1) element scroll
             scrollBy(containerSelector, scrollStep);
             wait(500);
-            // 2) wheel scroll to trigger virtual renderers
-            hover(containerSelector);
-            page.mouse().wheel(0, wheelStep);
             wait(500);
             
             // Escalate steps if no new data is found
@@ -1029,6 +1024,35 @@ public class WebDSL {
         writeDebugFile("table_extract_debug.txt", debug);
         log("  -> Extracted " + results.size() + " row texts.");
         return results;
+    }
+
+    private String buildStableRowKey(Locator row, String normalizedText) {
+        try {
+            String attrKey = "";
+            try { attrKey = row.evaluate("el => el.getAttribute('data-row-key') || el.getAttribute('data-rowid') || el.getAttribute('data-row-id') || ''").toString(); } catch (Exception ignored) {}
+            if (attrKey != null && !attrKey.isEmpty()) {
+                return "rowkey:" + attrKey;
+            }
+            Locator cells = row.locator("td, .art-table-cell, .ant-table-cell");
+            int cc = cells.count();
+            if (cc > 0) {
+                StringBuilder sb = new StringBuilder();
+                int take = Math.min(2, cc);
+                for (int i = 0; i < take; i++) {
+                    try {
+                        String t = normalizeText(cells.nth(i).innerText());
+                        if (!t.isEmpty()) {
+                            if (sb.length() > 0) sb.append("|");
+                            sb.append(t);
+                        }
+                    } catch (Exception ignored) {}
+                }
+                if (sb.length() > 0) {
+                    return "cells:" + md5(sb.toString());
+                }
+            }
+        } catch (Exception ignored) {}
+        return "md5:" + md5(normalizedText);
     }
 
     /**
