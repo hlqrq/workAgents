@@ -14,6 +14,7 @@ public class AppConfig {
     public static final String KEY_MINIMAX_API_KEY = "minimax.api-key";
     public static final String KEY_MOONSHOT_API_KEY = "moonshot.api-key";
     public static final String KEY_MOONSHOT_THINKING = "moonshot.thinking";
+    public static final String KEY_GLM_API_KEY = "glm.api-key";
     public static final String KEY_ALIYUN_API_KEY = "aliyun.api-key";
     public static final String KEY_ALIYUN_OSS_ENDPOINT = "aliyun.oss.endpoint";
     public static final String KEY_ALIYUN_OSS_ACCESS_KEY_ID = "aliyun.oss.access-key-id";
@@ -84,6 +85,10 @@ public class AppConfig {
     
     public String getMoonshotThinking() {
         return getProperty(KEY_MOONSHOT_THINKING);
+    }
+
+    public String getGlmApiKey() {
+        return getProperty(KEY_GLM_API_KEY);
     }
 
     public String getAliyunApiKey() {

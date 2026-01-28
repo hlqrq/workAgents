@@ -61,7 +61,8 @@ public class LLMUtil {
         ALIYUN_VL,
         OLLAMA, // Added Ollama support
         MINIMAX,
-        MOONSHOT
+        MOONSHOT,
+        GLM
     }
 
     public static final String OLLAMA_HOST = "http://localhost:11434";
@@ -754,6 +755,58 @@ public class LLMUtil {
             }
         } catch (Exception e) {
             System.err.println("Minimax Chat Exception: " + e.getMessage());
+            e.printStackTrace();
+        }
+        return "";
+    }
+
+    // --- Zhipu GLM ---
+
+    public static String chatWithGLM(String prompt) {
+        String apiKey = AppConfig.getInstance().getGlmApiKey();
+        if (apiKey == null || apiKey.trim().isEmpty()) {
+            System.err.println("GLM API Key is missing!");
+            return "";
+        }
+
+        try {
+            java.util.Map<String, Object> message = new java.util.HashMap<>();
+            message.put("role", "user");
+            message.put("content", prompt);
+
+            java.util.Map<String, Object> payload = new java.util.HashMap<>();
+            payload.put("model", "glm-4.6");
+            payload.put("messages", java.util.List.of(message));
+            payload.put("stream", false);
+
+            String jsonBody = com.alibaba.fastjson2.JSON.toJSONString(payload);
+
+            java.net.http.HttpClient client = java.net.http.HttpClient.newHttpClient();
+            java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
+                    .uri(java.net.URI.create("https://open.bigmodel.cn/api/paas/v4/chat/completions"))
+                    .header("Content-Type", "application/json")
+                    .header("Authorization", "Bearer " + apiKey)
+                    .POST(java.net.http.HttpRequest.BodyPublishers.ofString(jsonBody))
+                    .build();
+
+            java.net.http.HttpResponse<String> response = client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+
+            if (response.statusCode() >= 200 && response.statusCode() < 300) {
+                com.alibaba.fastjson2.JSONObject jsonResponse = com.alibaba.fastjson2.JSON.parseObject(response.body());
+                if (jsonResponse.containsKey("choices")) {
+                    com.alibaba.fastjson2.JSONArray choices = jsonResponse.getJSONArray("choices");
+                    if (choices != null && !choices.isEmpty()) {
+                        String content = choices.getJSONObject(0)
+                                .getJSONObject("message")
+                                .getString("content");
+                        return content;
+                    }
+                }
+            } else {
+                System.err.println("GLM API Error: " + response.statusCode() + " - " + response.body());
+            }
+        } catch (Exception e) {
+            System.err.println("GLM Chat Exception: " + e.getMessage());
             e.printStackTrace();
         }
         return "";

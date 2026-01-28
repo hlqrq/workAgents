@@ -34,7 +34,8 @@ SECTION 2: DYNAMIC LISTS & TABLES (Virtual Scrolling)
 Use high-level DSL methods. Avoid manual scroll loops and DOM re-reading after extraction.
 
 - **Row Text Output**: `web.extractFirstPageRows(containerSelector, rowSelector, cellSelector)` then output the returned list.
-- **Structured Output**: `web.extractFirstPageTable(containerSelector, rowSelector, columnsMap)` then format using the returned data.
+- **Structured Output**: `web.extractFirstPageTable(containerSelector, rowSelector, columnsMap)`.
+  - IMPORTANT: `columnsMap` keys MUST be Strings (e.g. `["1": "sel"]`, NOT `[1: "sel"]`).
 - **Locate Item**: `web.locateItem(containerSelector, rowSelector, textToFind)`.
 
 API REFERENCE (DSL - variable 'web'):

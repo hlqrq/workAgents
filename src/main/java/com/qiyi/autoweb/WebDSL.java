@@ -417,7 +417,7 @@ public class WebDSL {
         return extractRowTexts(containerSelector, rowSelector, cellSelector, size);
     }
     
-    public List<java.util.Map<String, String>> extractFirstPageTable(String containerSelector, String rowSelector, java.util.Map<String, String> columns) {
+    public List<java.util.Map<String, String>> extractFirstPageTable(String containerSelector, String rowSelector, java.util.Map<?, ?> columns) {
         int size = resolvePageSize();
         if (size < 1) size = -1;
         return extractTableData(containerSelector, rowSelector, size, columns);
@@ -795,7 +795,7 @@ public class WebDSL {
      *                          Example: {"OrderNo": "td:nth-child(2)", "Status": ".status-label"}
      * @return List of Maps, where each Map represents a row's data.
      */
-    public List<java.util.Map<String, String>> extractTableData(String containerSelector, String rowSelector, int limit, java.util.Map<String, String> columns) {
+    public List<java.util.Map<String, String>> extractTableData(String containerSelector, String rowSelector, int limit, java.util.Map<?, ?> columns) {
         log("Action: Extracting table data from '" + containerSelector + "'...");
         
         containerSelector = ensureScrollableContainer(containerSelector, rowSelector);
@@ -834,9 +834,9 @@ public class WebDSL {
                 // 2. Extract columns
                 java.util.Map<String, String> rowData = new java.util.HashMap<>();
                 
-                for (java.util.Map.Entry<String, String> entry : columns.entrySet()) {
-                    String colName = entry.getKey();
-                    String colSel = entry.getValue();
+                for (java.util.Map.Entry<?, ?> entry : columns.entrySet()) {
+                    String colName = String.valueOf(entry.getKey());
+                    String colSel = String.valueOf(entry.getValue());
                     try {
                         // Relative selector from the row
                         Locator colLoc = row.locator(colSel).first();

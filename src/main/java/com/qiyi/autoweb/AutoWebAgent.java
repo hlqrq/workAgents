@@ -47,6 +47,9 @@ public class AutoWebAgent {
                 } else if ("MOONSHOT".equals(upper) || "MOONSHOT_MOONSHOT".equals(upper) || "MOONSHOT_V1".equals(upper)) {
                     ACTIVE_MODEL = "MOONSHOT";
                     System.out.println("Using model: Moonshot (remote)");
+                } else if ("GLM".equals(upper) || "ZHIPU".equals(upper)) {
+                    ACTIVE_MODEL = "GLM";
+                    System.out.println("Using model: Zhipu GLM (remote)");
                 } else if ("OLLAMA_MODEL_QWEN3_8B".equals(upper)
                         || "OLLAMA_QWEN3_8B".equals(upper)
                         || "OLLAMA".equals(upper)
@@ -517,8 +520,9 @@ public class AutoWebAgent {
         JComboBox<String> modelCombo = new JComboBox<>();
         modelCombo.addItem("DeepSeek");
         modelCombo.addItem("Qwen-Max");
-        modelCombo.addItem("Minimax");
         modelCombo.addItem("Moonshot");
+        modelCombo.addItem("GLM");
+        modelCombo.addItem("Minimax");
         modelCombo.addItem("Gemini");
         modelCombo.addItem("Ollama Qwen3:8B");
         if ("QWEN_MAX".equals(ACTIVE_MODEL)) {
@@ -531,6 +535,8 @@ public class AutoWebAgent {
             modelCombo.setSelectedItem("Minimax");
         } else if ("MOONSHOT".equals(ACTIVE_MODEL)) {
             modelCombo.setSelectedItem("Moonshot");
+        } else if ("GLM".equals(ACTIVE_MODEL)) {
+            modelCombo.setSelectedItem("GLM");
         } else {
             modelCombo.setSelectedItem("DeepSeek");
         }
@@ -546,6 +552,8 @@ public class AutoWebAgent {
                 ACTIVE_MODEL = "MINIMAX";
             } else if ("Moonshot".equals(selected)) {
                 ACTIVE_MODEL = "MOONSHOT";
+            } else if ("GLM".equals(selected)) {
+                ACTIVE_MODEL = "GLM";
             } else {
                 ACTIVE_MODEL = "DEEPSEEK";
             }
@@ -979,6 +987,14 @@ public class AutoWebAgent {
                 if (code == null || code.trim().isEmpty()) {
                     if (uiLogger != null) {
                         uiLogger.accept("Moonshot 调用未返回结果或发生错误。");
+                    }
+                }
+                break;
+            case "GLM":
+                code = callLLMWithTimeout(() -> LLMUtil.chatWithGLM(prompt), 180000L, uiLogger, "GLM");
+                if (code == null || code.trim().isEmpty()) {
+                    if (uiLogger != null) {
+                        uiLogger.accept("GLM 调用未返回结果或发生错误。");
                     }
                 }
                 break;
