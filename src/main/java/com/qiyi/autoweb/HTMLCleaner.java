@@ -43,6 +43,9 @@ public class HTMLCleaner {
         if (html == null || html.isEmpty()) return "";
 
         Document doc = Jsoup.parse(html);
+
+        doc.select("translate-tooltip-mtz,translate-selection-mtz,translate-text-mtz,translate-button-mtz").remove();
+        doc.select("[src^=chrome-extension://],[href^=chrome-extension://],[src^=moz-extension://],[href^=moz-extension://],[src^=safari-extension://],[href^=safari-extension://]").remove();
         
         // 1. 移除不需要的标签
         doc.select(String.join(",", TAGS_TO_REMOVE)).remove();

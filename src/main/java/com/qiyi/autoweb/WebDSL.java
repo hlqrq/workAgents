@@ -92,6 +92,71 @@ public class WebDSL {
         page.navigate(url);
     }
 
+    /**
+     * Alias for navigate.
+     */
+    public void open(String url) {
+        navigate(url);
+    }
+
+    public String getCurrentUrl() {
+        return page.url();
+    }
+
+    public String getTitle() {
+        return page.title();
+    }
+
+    public void waitForUrl(String urlRegex) {
+        log("Wait: For URL matching '" + urlRegex + "'");
+        page.waitForURL(urlRegex, new Page.WaitForURLOptions().setTimeout(defaultTimeout));
+    }
+    
+    public void waitForLoadState() {
+        log("Wait: For load state (networkidle)");
+        try {
+            page.waitForLoadState(com.microsoft.playwright.options.LoadState.NETWORKIDLE, new Page.WaitForLoadStateOptions().setTimeout(defaultTimeout));
+        } catch (Exception e) {
+            // Fallback to load
+            page.waitForLoadState(com.microsoft.playwright.options.LoadState.LOAD);
+        }
+    }
+
+    /**
+     * Executes an action that triggers a new page (tab/window), waits for it, 
+     * and returns a new WebDSL instance for that page.
+     */
+    public WebDSL waitForNewPage(Runnable triggerAction) {
+        log("Action: Waiting for new page...");
+        try {
+            Page newPage = page.context().waitForPage(() -> {
+                triggerAction.run();
+            });
+            newPage.waitForLoadState();
+            log("  -> New page opened: " + newPage.title() + " (" + newPage.url() + ")");
+            return new WebDSL(newPage, this.logger);
+        } catch (Exception e) {
+            log("Error waiting for new page: " + e.getMessage());
+            throw e;
+        }
+    }
+
+    /**
+     * Executes an action that triggers navigation in the CURRENT page.
+     */
+    public void waitForNavigation(Runnable triggerAction) {
+        log("Action: Waiting for navigation...");
+        try {
+            page.waitForNavigation(() -> {
+                triggerAction.run();
+            });
+            log("  -> Navigation completed. Current URL: " + page.url());
+        } catch (Exception e) {
+            log("Error waiting for navigation: " + e.getMessage());
+            throw e;
+        }
+    }
+
     public void reload() {
         log("Action: Reload page");
         page.reload();

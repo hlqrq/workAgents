@@ -1,6 +1,7 @@
 package com.qiyi.util;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Assumptions;
 
 import io.github.ollama4j.models.chat.OllamaChatResult;
 import io.github.ollama4j.models.generate.OllamaStreamHandler;
@@ -18,6 +19,21 @@ public class LLMUtilTest {
     private static final String VL_MODEL_NAME = LLMUtil.OLLAMA_MODEL_QWEN3_VL_8B;
     private static final String TRANSLATION_MODEL_NAME = LLMUtil.OLLAMA_MODEL_HUNYUAN_MT;
     public static final String OLLAMA_HOST = "http://192.168.3.60:11434";
+    private static final long STREAMING_MAX_WAIT_MS = 60000L;
+
+    private static boolean shouldRunOllamaTests() {
+        String v = System.getenv("RUN_OLLAMA_TESTS");
+        if (v == null) return false;
+        v = v.trim();
+        return "1".equals(v) || "true".equalsIgnoreCase(v) || "yes".equalsIgnoreCase(v);
+    }
+
+    private static String resolveOllamaHost() {
+        String v = System.getenv("OLLAMA_HOST");
+        if (v == null) return OLLAMA_HOST;
+        v = v.trim();
+        return v.isEmpty() ? OLLAMA_HOST : v;
+    }
 
     public static void main(String[] args)
     {
@@ -30,12 +46,13 @@ public class LLMUtilTest {
 
     @Test
     public void testChatWithOllamaTranslation() {
+        Assumptions.assumeTrue(shouldRunOllamaTests());
         System.out.println("=== Testing chatWithOllamaTranslation ===");
         String sourceText = "你好，我很高兴到杭州，希望我们有个美好的假期";
         String prompt = "Translate the following segment into <" + HunyuanLanguage.JAPANESE.getCode() + ">, without additional explanation. \n\n " + sourceText;
         
         long startTime = System.currentTimeMillis();
-        String response = LLMUtil.chatWithOllama(prompt, TRANSLATION_MODEL_NAME, null, false, OLLAMA_HOST);
+        String response = LLMUtil.chatWithOllama(prompt, TRANSLATION_MODEL_NAME, null, false, resolveOllamaHost());
         long endTime = System.currentTimeMillis();
         System.out.println("Execution time: " + (endTime - startTime) + "ms");
         System.out.println("Response: " + response);
@@ -46,11 +63,12 @@ public class LLMUtilTest {
 
     @Test
     public void testChatWithOllama() {
+        Assumptions.assumeTrue(shouldRunOllamaTests());
         System.out.println("=== Testing chatWithOllama ===");
         String prompt = "请你把如下的句子里面提炼出核心的时间，地点，人物，事情：明天小王要去上海参加国际绘画展";
         // Assuming the third argument is chatHistory, passing null or empty string
         long startTime = System.currentTimeMillis();
-        String response = LLMUtil.chatWithOllama(prompt, MODEL_NAME, null,false,OLLAMA_HOST);
+        String response = LLMUtil.chatWithOllama(prompt, MODEL_NAME, null,false, resolveOllamaHost());
         long endTime = System.currentTimeMillis();
         System.out.println("Execution time: " + (endTime - startTime) + "ms");
         System.out.println("No Thinking Response: " + response);    
@@ -61,7 +79,7 @@ public class LLMUtilTest {
         }
 
         startTime = System.currentTimeMillis();
-        response = LLMUtil.chatWithOllama(prompt, MODEL_NAME, null,true,OLLAMA_HOST);
+        response = LLMUtil.chatWithOllama(prompt, MODEL_NAME, null,true, resolveOllamaHost());
         endTime = System.currentTimeMillis();
         System.out.println("Execution time: " + (endTime - startTime) + "ms");
         System.out.println("Thinking Response: " + response);
@@ -72,23 +90,29 @@ public class LLMUtilTest {
 
     @Test
     public void testChatWithOllamaStreaming() {
+        Assumptions.assumeTrue(shouldRunOllamaTests());
         System.out.println("=== Testing chatWithOllamaStreaming ===");
         String prompt = "简单说一下中国长城的历史";
         StringBuilder contentBuilder = new StringBuilder();
         StringBuilder thiinkContentBuilder = new StringBuilder();
 
         long startTime = System.currentTimeMillis();
+        String host = resolveOllamaHost();
         OllamaChatResult response = LLMUtil.chatWithOllamaStreaming(prompt, MODEL_NAME,null,false,null, new OllamaStreamHandler() {
             @Override
             public void accept(String s) {
                 //这个用于逐步输出，如果要一次性获得结果，可以直接使用最后的response里面的完整content
                 contentBuilder.append(s);
             }
-        },OLLAMA_HOST);
+        }, host);
 
         if (response != null) {
             // Wait for completion if async
+            long startWait = System.currentTimeMillis();
             while (response.getResponseModel() != null && !response.getResponseModel().isDone()) {
+                if (System.currentTimeMillis() - startWait > STREAMING_MAX_WAIT_MS) {
+                    throw new RuntimeException("Streaming timeout (no-thinking), host=" + host);
+                }
                 try {
                     Thread.sleep(200);
                 } catch (InterruptedException e) {
@@ -119,11 +143,15 @@ public class LLMUtilTest {
                 //这个用于逐步输出，如果要一次性获得结果，可以直接使用最后的response里面的完整content
                 contentBuilder.append(s);
             }
-        },OLLAMA_HOST);
+        }, host);
 
         if (response != null) {
             // Wait for completion if async
+            long startWait = System.currentTimeMillis();
             while (response.getResponseModel() != null && !response.getResponseModel().isDone()) {
+                if (System.currentTimeMillis() - startWait > STREAMING_MAX_WAIT_MS) {
+                    throw new RuntimeException("Streaming timeout (thinking), host=" + host);
+                }
                 try {
                     Thread.sleep(200);
                 } catch (InterruptedException e) {
@@ -144,6 +172,7 @@ public class LLMUtilTest {
 
     @Test
     public void testChatWithOllamaImage() {
+        Assumptions.assumeTrue(shouldRunOllamaTests());
         System.out.println("=== Testing chatWithOllamaImage ===");
         String prompt = "抽取一下信息";
         // Example image URL (Placeholder)
@@ -153,7 +182,7 @@ public class LLMUtilTest {
         
         // Note: Requires a vision-capable model like qwen3-vl:8b
         long startTime = System.currentTimeMillis();
-        OllamaChatResult response = LLMUtil.chatWithOllamaImage(prompt, VL_MODEL_NAME, null, false, images,OLLAMA_HOST);
+        OllamaChatResult response = LLMUtil.chatWithOllamaImage(prompt, VL_MODEL_NAME, null, false, images, resolveOllamaHost());
         long endTime = System.currentTimeMillis();
         System.out.println("Execution time: " + (endTime - startTime) + "ms");
         

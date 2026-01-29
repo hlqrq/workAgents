@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.contains;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
 public class DownloadPodcastToolTest {
@@ -30,6 +31,26 @@ public class DownloadPodcastToolTest {
         MockitoAnnotations.openMocks(this);
         tool = new DownloadPodcastTool();
         tool.setPodwiseAgent(podwiseAgent);
+        unlockDownloadLock();
+    }
+
+    private void unlockDownloadLock() {
+        try {
+            java.lang.reflect.Field f = DownloadPodcastTool.class.getDeclaredField("DOWNLOAD_LOCK");
+            f.setAccessible(true);
+            java.util.concurrent.locks.ReentrantLock lock = (java.util.concurrent.locks.ReentrantLock) f.get(null);
+            while (lock != null && lock.isHeldByCurrentThread()) {
+                lock.unlock();
+            }
+            while (lock != null && lock.isLocked()) {
+                try {
+                    lock.unlock();
+                } catch (IllegalMonitorStateException ignored) {
+                    break;
+                }
+            }
+        } catch (Exception ignored) {
+        }
     }
 
     @Test
@@ -40,7 +61,7 @@ public class DownloadPodcastToolTest {
     @Test
     public void testExecuteDefault() throws Exception {
         JSONObject params = new JSONObject();
-        when(podwiseAgent.run(anyInt(), anyInt(), anyInt(), anyInt(), anyInt())).thenReturn(5);
+        when(podwiseAgent.run(anyInt(), anyInt(), anyInt(), anyInt(), anyInt(), any(ToolContext.class))).thenReturn(5);
 
         String result = tool.execute(params, context);
 
@@ -49,7 +70,8 @@ public class DownloadPodcastToolTest {
                 DownloadPodcastTool.DOWNLOAD_MAX_TRY_TIMES,
                 DownloadPodcastTool.DOWNLOAD_MAX_DUPLICATE_PAGES,
                 DownloadPodcastTool.DOWNLOAD_DOWNLOAD_MAX_PROCESS_COUNT,
-                DownloadPodcastTool.DOWNLOAD_THREAD_POOL_SIZE
+                DownloadPodcastTool.DOWNLOAD_THREAD_POOL_SIZE,
+                context
         );
         assertTrue(result.contains("5"));
         verify(context, atLeastOnce()).sendText(anyString());
@@ -64,18 +86,18 @@ public class DownloadPodcastToolTest {
         params.put("downloadMaxProcessCount", 2);
         params.put("threadPoolSize", 5);
 
-        when(podwiseAgent.run(anyInt(), anyInt(), anyInt(), anyInt(), anyInt())).thenReturn(10);
+        when(podwiseAgent.run(anyInt(), anyInt(), anyInt(), anyInt(), anyInt(), any(ToolContext.class))).thenReturn(10);
 
         String result = tool.execute(params, context);
 
-        verify(podwiseAgent).run(10, 20, 3, 2, 5);
+        verify(podwiseAgent).run(10, 20, 3, 2, 5, context);
         assertTrue(result.contains("10"));
     }
 
     @Test
     public void testExecuteException() throws Exception {
         JSONObject params = new JSONObject();
-        when(podwiseAgent.run(anyInt(), anyInt(), anyInt(), anyInt(), anyInt())).thenThrow(new RuntimeException("Test Exception"));
+        when(podwiseAgent.run(anyInt(), anyInt(), anyInt(), anyInt(), anyInt(), any(ToolContext.class))).thenThrow(new RuntimeException("Test Exception"));
 
         String result = tool.execute(params, context);
 

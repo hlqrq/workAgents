@@ -770,6 +770,18 @@ public class LLMUtil {
         }
 
         try {
+            String thinkingRaw = AppConfig.getInstance().getGlmThinking();
+            String thinkingNorm = thinkingRaw == null ? "" : thinkingRaw.trim().toLowerCase();
+            String thinkingType;
+            if (thinkingNorm.isEmpty()) {
+                thinkingType = "disabled";
+            } else if ("enabled".equals(thinkingNorm) || "enable".equals(thinkingNorm) || "true".equals(thinkingNorm) || "1".equals(thinkingNorm) || "on".equals(thinkingNorm)) {
+                thinkingType = "enabled";
+            } else if ("disabled".equals(thinkingNorm) || "disable".equals(thinkingNorm) || "false".equals(thinkingNorm) || "0".equals(thinkingNorm) || "off".equals(thinkingNorm)) {
+                thinkingType = "disabled";
+            } else {
+                thinkingType = "disabled";
+            }
             java.util.Map<String, Object> message = new java.util.HashMap<>();
             message.put("role", "user");
             message.put("content", prompt);
@@ -778,6 +790,9 @@ public class LLMUtil {
             payload.put("model", "glm-4.6");
             payload.put("messages", java.util.List.of(message));
             payload.put("stream", false);
+            java.util.Map<String, Object> thinking = new java.util.HashMap<>();
+            thinking.put("type", thinkingType);
+            payload.put("thinking", thinking);
 
             String jsonBody = com.alibaba.fastjson2.JSON.toJSONString(payload);
 
@@ -799,6 +814,9 @@ public class LLMUtil {
                         String content = choices.getJSONObject(0)
                                 .getJSONObject("message")
                                 .getString("content");
+                        if (content != null) {
+                            content = content.replaceAll("(?s)<think>.*?</think>", "").trim();
+                        }
                         return content;
                     }
                 }

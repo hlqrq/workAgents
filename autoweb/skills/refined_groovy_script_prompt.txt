@@ -3,7 +3,7 @@ You previously generated Groovy Playwright automation code for the following tas
 Original User Task:
 %s
 
-Cleaned HTML snapshot of the current page/frame:
+Context Payload (may include MODE, plan, and/or cleaned HTML snapshots):
 %s
 
 Previous Groovy Code:
@@ -19,11 +19,32 @@ CRITICAL FIX REQUIREMENTS:
 - **Optimization Goal**: Use the `web` DSL variable for robust interaction.
 - **Language**: All non-code commentary (Plan, reasoning, notes) and `web.log()` messages SHOULD be in Chinese.
 - **Safety Rule**: 禁止使用 while(true) 或无限循环；改用有界循环或 DSL 的 extractTableData/locateItem/withMaxRetries 等。
-- **Two-Stage Process**: 
--  1. Analyze the Error and HTML. Create a "Fix Plan".
--  2. Generate the corrected Groovy code based on the plan.
+- **Refine Modes (Required)**:
+  - The Context Payload may contain `MODE: PLAN_REFINE` or `MODE: REFINE_CODE`.
+  - **MODE: PLAN_REFINE**:
+    - The "Previous Groovy Code" is a plan block (not executable code).
+    - Use "Additional User Hint" to clarify missing URLs/entry actions.
+    - If Context Payload contains `USER_PROVIDED_URLS:` (e.g. `- 订单管理: https://...`), you MUST treat them as authoritative.
+      - Prefer mapping by label/intent to each step `Description`.
+      - If a hint says a URL is used for a specific task, bind that URL to the step and set `Status: CONFIRMED` for URL part.
+    - If Context Payload contains `USER_INPUT_RAW: ...`, you MUST parse it as natural language.
+      - If it contains a URL (even without a label) or describes an entry point, extract it and update the plan.
+      - Treat it as a direct instruction from the user (e.g., "Use https://example.com for step 1").
+    - CRITICAL: If a user provided URL is present (via USER_PROVIDED_URL or extracted from USER_INPUT_RAW), you MUST assume the entry point is fully resolved and set Status: CONFIRMED for the entry step. Do NOT ask confirmation questions (e.g. "is this the right page?", "is it default selected?") - instead, generate a step to "Ensure/Verify X is selected" and mark it CONFIRMED. We must proceed to CODEGEN to verify via HTML.
+    - Output the updated FINAL PLAN ONLY (block comment). Do NOT generate executable code.
+    - If still missing info, keep `Status: UNKNOWN` and ask again in `QUESTION:`.
+  - **MODE: REFINE_CODE**:
+    - The Context Payload will include the original PLAN and per-step cleaned HTML snapshots.
+    - Use the full context (plan + per-step HTML + previous code + execution output + new hint) to generate the improved Groovy code.
+    - OUTPUT MUST BE A COMPLETE, STANDALONE SCRIPT:
+      - Return the ENTIRE updated Groovy script, not a diff, not a snippet, and not "only the new step".
+      - Do NOT say "步骤1-5保留" without actually outputting them; you MUST output the full code including all steps.
+      - Do NOT assume earlier steps have already executed in this run; each execution starts from the current browser state.
+    - IMPORTANT: The original PLAN may have been created without page HTML/DSL context.
+      - You MAY refine/expand the Plan comments (selectors, entry actions, missing sub-steps) based on the HTML snapshots, DSL reference, and execution errors.
+      - Keep the Plan comments consistent with the final code you output.
 - **Pagination Requirement**: If the User Task asks for "all" records (e.g. "查询所有", "query all"), you MUST check for pagination (Next button or Infinite Scroll) and use the appropriate DSL method (`extractPagesTable` or `extractTableData`). Do NOT just extract the first page unless no pagination exists.
--  All non-code commentary (Fix Plan, reasoning, notes) MUST be output as Groovy line comments starting with `//`. Do NOT output bare text that could break code execution.
+-  All non-code commentary (Fix Plan, reasoning, notes) MUST be output as Groovy line comments starting with `//` or `/* */`. Do NOT output bare text.
 - **Variable Rule**: Do NOT redeclare variables.
 - **No Translation**: Do NOT translate keywords from the User Task or Hint. Use them exactly as provided.
 - **Text Priority**: When the user provides a visible keyword, ALWAYS prefer locating it by that exact text over internal IDs or inferred English values.
@@ -32,9 +53,12 @@ CRITICAL FIX REQUIREMENTS:
   - **Robust Regex**: Text often lacks standard separators or has erratic spacing. ALWAYS make separators (like colons) optional (e.g. `[:：\s]*`) to handle various formats.
   - Example: `def res = web.extractModalData('.modal', ['key': 'LabelText[:：\s]*(CapturedValue)'])`
 - Do NOT wait for hidden inputs to be visible; click the label or parent (the DSL handles this).
+- For Chinese UI texts that may contain random spaces (e.g. "重 置", "搜 索"):
+  - Prefer regex text selectors to ignore whitespace, e.g. `text=/重\\s*置/`, `text=/搜\\s*索/`, `text=/已\\s*发\\s*货/`.
 - For table operations, PREFER per-row CSS selectors with `:nth-child()` (e.g., `".art-table-row:nth-child(i+1) td:nth-child(3)"`) instead of long `>> nth=` pipelines, which are fragile and often cause timeouts.
 - For flaky elements, increase robustness with `web.withMaxRetries(5)` or `web.clickWithRetry('#selector')`. Adjust timeouts via `web.withDefaultTimeout(40000)`.
 
+[CODEGEN_ONLY_START]
 SECTION 2: DYNAMIC LISTS, TABLES & PAGINATION
 Use high-level DSL methods. Avoid manual scroll loops and DOM re-reading after extraction.
 
@@ -84,6 +108,13 @@ API REFERENCE (DSL - variable 'web'):
   - `extractModalData(modalSelector, regexPatternsMap)`: **POWERFUL**. Extracts data from a popup using regex. Example: `web.extractModalData('.modal', ['success': '成功.*?(\\d+)'])`.
   - `closeModal(modalSelector, closeBtnSelector)`: Closes a modal and waits for it to vanish.
   - `dismissPopups(selectors...)`: Try to click specified selectors to close ads/notifications.
+  - `open(url)`: Opens a URL.
+  - `waitForNewPage(triggerAction)`: **POWERFUL**. Returns new WebDSL for new window. Example: `def newPage = web.waitForNewPage { web.click('#link') }`.
+  - `waitForNavigation(triggerAction)`: Waits for navigation after action.
+  - `waitForUrl(regex)`: Waits for URL match.
+  - `waitForLoadState()`: Waits for network idle.
+  - `getCurrentUrl()`: Get URL.
+  - `getTitle()`: Get Title.
   - `navigate(url)`: Navigates to a specific URL.
   - `reload()`: Reloads the current page.
   - `goBack()`: Navigates back in history.
@@ -97,7 +128,11 @@ SECTION 4: RETURN TO START & STATE MANAGEMENT
   - Do NOT manually click "1" unless specific logic requires it.
   - Do NOT assume `web.scrollToTop()` is enough if you are on page 5.
 
-Output ONLY the final Groovy code (including the Plan comments).
+[CODEGEN_ONLY_END]
+
+FINAL OUTPUT RULES:
+- If `MODE: PLAN_REFINE`: Output ONLY the updated Plan block comment (and `QUESTION:` if needed). No executable Groovy statements.
+- If `MODE: REFINE_CODE`: Output ONLY the final Groovy code (including the Plan comments).
 
 Example Format:
 ```groovy
