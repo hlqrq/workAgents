@@ -467,12 +467,14 @@ public class AutoWebAgent {
             java.util.List<HtmlSnapshot> out = new java.util.ArrayList<>();
             AutoWebAgentUI.FrameState frameState = AutoWebAgentUI.captureFrameState();
 
+            // 同一 URL 的多个 step 只采集一次：避免重复打开页面与重复抓取，节省时间与 token
             java.util.HashMap<String, HtmlSnapshot> snapshotByUrl = new java.util.HashMap<>();
             com.microsoft.playwright.BrowserContext ctx = rootPage.context();
             Page tmp = null;
             java.util.List<Page> openedPages = new java.util.ArrayList<>();
             String rootUrl = safePageUrl(rootPage);
             try {
+                // 统一使用一个临时 Page 进行跨 URL 导航采集，避免污染用户正在操作的 rootPage
                 tmp = ctx.newPage();
                 openedPages.add(tmp);
                 for (PlanStep step : steps) {
@@ -481,10 +483,12 @@ public class AutoWebAgent {
                     String url = normalizeUrlToken(step.targetUrl);
                     boolean isCurrentPage = (url == null || url.trim().isEmpty() || "CURRENT_PAGE".equalsIgnoreCase(url.trim()));
                     if (isCurrentPage) {
+                        // 计划里写 CURRENT_PAGE/空地址时，视为“采集当前 rootPage”
                         url = rootUrl;
                     }
                     url = normalizeUrlToken(url);
                     if (!looksLikeUrl(url)) {
+                        // 不是标准 URL（可能是占位符/标签/UNKNOWN），只能尝试按原样读缓存
                         HtmlSnapshot cached = readCachedHtml(step.index, url, step.entryAction, captureMode, a11yInterestingOnly);
                         if (cached != null) out.add(cached);
                         continue;
@@ -493,6 +497,7 @@ public class AutoWebAgent {
                     String urlKey = url == null ? "" : url.trim();
                     HtmlSnapshot existing = urlKey.isEmpty() ? null : snapshotByUrl.get(urlKey);
                     if (existing != null) {
+                        // 同 URL 的 step 直接复用第一次采集的 cleanedHtml，只更新 stepIndex/entryAction
                         if (uiLogger != null) uiLogger.accept("复用已采集页面: Step " + step.index + " | " + url + " | sameAsStep=" + existing.stepIndex);
                         HtmlSnapshot clone = new HtmlSnapshot();
                         clone.stepIndex = step.index;
@@ -505,6 +510,7 @@ public class AutoWebAgent {
                     }
 
                     if (isCurrentPage) {
+                        // 当前页面：优先走缓存；未命中时从 rootPage 采集，并自动选择最佳 iframe 上下文
                         HtmlSnapshot cached = readCachedHtml(step.index, url, step.entryAction, captureMode, a11yInterestingOnly);
                         if (cached != null) {
                             if (uiLogger != null) uiLogger.accept("命中缓存: Step " + step.index + " | " + url);
@@ -513,12 +519,14 @@ public class AutoWebAgent {
                             continue;
                         }
 
+                        // 采集时尽量减少控制台窗口遮挡对页面可见性/布局的影响
                         AutoWebAgentUI.minimizeFrameIfNeeded(frameState);
                         if (uiLogger != null) uiLogger.accept("采集当前页面: Step " + step.index + " | " + url);
                         String rawHtml = "";
                         try {
                             ContextWrapper best = null;
                             for (int attempt = 0; attempt < 16; attempt++) {
+                                // 页面可能动态加载 iframe：短轮询等待最佳内容上下文出现
                                 ScanResult sr = scanContexts(rootPage);
                                 if (sr != null) best = sr.best;
                                 if (best != null && best.name != null && !"Main Page".equals(best.name)) break;
@@ -538,12 +546,14 @@ public class AutoWebAgent {
                                 }
                                 rawHtml = getPageContent(best.context, captureMode, a11yInterestingOnly);
                             } else {
+                                // 极端情况：上下文扫描失败则回退采集主 Page
                                 rawHtml = getPageContent(rootPage, captureMode, a11yInterestingOnly);
                             }
                         } catch (Exception ignored) {
                             try { rawHtml = getPageContent(rootPage, captureMode, a11yInterestingOnly); } catch (Exception ignored2) {}
                         }
                         String cleaned = cleanCapturedContent(rawHtml, captureMode);
+                        // raw/cleaned 同时落盘缓存，供后续 CODEGEN/REFINE 复用
                         HtmlSnapshot snap = writeCachedHtml(step.index, url, step.entryAction, captureMode, a11yInterestingOnly, rawHtml, cleaned);
                         if (snap != null) {
                             if (!urlKey.isEmpty()) snapshotByUrl.putIfAbsent(urlKey, snap);
@@ -552,6 +562,7 @@ public class AutoWebAgent {
                         continue;
                     }
 
+                    // 非当前页面：先查缓存，未命中则导航到目标 URL 再采集
                     HtmlSnapshot cached = readCachedHtml(step.index, url, step.entryAction, captureMode, a11yInterestingOnly);
                     if (cached != null) {
                         if (uiLogger != null) uiLogger.accept("命中缓存: Step " + step.index + " | " + url);
@@ -572,6 +583,7 @@ public class AutoWebAgent {
                     } catch (Exception ignored) {
                         try { tmp.waitForLoadState(com.microsoft.playwright.options.LoadState.LOAD); } catch (Exception ignored2) {}
                     }
+                    // 登录/跳转场景可能带 query 或中间页：用“URL 前缀”方式等待落到目标页面（忽略参数）
                     boolean stepOk = waitForUrlPrefix(tmp, url, 120000, 2000, uiLogger, "采集页面 Step " + step.index);
                     if (!stepOk) {
                         continue;
@@ -580,11 +592,13 @@ public class AutoWebAgent {
                     String entry = step.entryAction == null ? "" : step.entryAction;
                     String token = firstQuotedToken(entry);
                     if (token != null) {
+                        // Entry Action 里常包含引号包裹的“入口按钮/链接”文本：尝试点击进入业务区域
                         try {
                             com.microsoft.playwright.Locator loc = tmp.locator("text=" + token).first();
                             if (loc != null) {
                                 boolean mayOpenNew = entry.contains("新开") || entry.toLowerCase().contains("new tab") || entry.toLowerCase().contains("new window");
                                 if (mayOpenNew) {
+                                    // 若入口动作描述为“新开/新窗口”，则等待新 Page 并切换采集上下文
                                     try {
                                         Page newPage = tmp.context().waitForPage(
                                                 new com.microsoft.playwright.BrowserContext.WaitForPageOptions().setTimeout(5000),
@@ -601,6 +615,7 @@ public class AutoWebAgent {
                                         try { loc.click(new com.microsoft.playwright.Locator.ClickOptions().setTimeout(5000)); } catch (Exception ignored) {}
                                     }
                                 } else {
+                                    // 普通点击：尽力等待网络空闲，提升采集到稳定 DOM 的概率
                                     try { loc.click(new com.microsoft.playwright.Locator.ClickOptions().setTimeout(5000)); } catch (Exception ignored) {}
                                     try {
                                         tmp.waitForLoadState(com.microsoft.playwright.options.LoadState.NETWORKIDLE, new Page.WaitForLoadStateOptions().setTimeout(8000));
@@ -614,6 +629,7 @@ public class AutoWebAgent {
                     try {
                         ContextWrapper best = null;
                         for (int attempt = 0; attempt < 16; attempt++) {
+                            // 采集前同样扫描 iframe：优先选择可见面积最大的内容 frame
                             ScanResult sr = scanContexts(tmp);
                             if (sr != null) best = sr.best;
                             if (best != null && best.name != null && !"Main Page".equals(best.name)) break;
@@ -651,6 +667,7 @@ public class AutoWebAgent {
                     if (p == null) continue;
                     try { p.close(); } catch (Exception ignored) {}
                 }
+                // 采集结束后恢复控制台窗口状态，避免影响用户后续操作
                 AutoWebAgentUI.restoreFrameIfNeeded(frameState);
             }
             return out;
@@ -689,6 +706,7 @@ public class AutoWebAgent {
                 Page p = (Page) pageOrFrame;
                 Object scoped = p;
                 try {
+                    // ARIA_SNAPSHOT 默认取 Page，但若存在更合适的内容 Frame，则优先在 Frame 上采集
                     ScanResult sr = scanContexts(p);
                     ContextWrapper best = sr == null ? null : sr.best;
                     if (best != null && best.context instanceof com.microsoft.playwright.Frame) {
@@ -705,6 +723,7 @@ public class AutoWebAgent {
                 } else {
                     snapText = p.locator("body").ariaSnapshot();
                 }
+                // 统一包成 JSON 文本，便于后续调试落盘与模型阅读
                 return wrapAsJsonText(snapText);
             } else if (pageOrFrame instanceof com.microsoft.playwright.Frame) {
                 com.microsoft.playwright.Frame f = (com.microsoft.playwright.Frame) pageOrFrame;

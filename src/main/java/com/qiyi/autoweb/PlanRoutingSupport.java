@@ -315,6 +315,7 @@ class PlanRoutingSupport {
                         new Page.WaitForLoadStateOptions().setTimeout(12000));
             } catch (Exception ignored) {}
 
+            // iframe 场景常见“先出主页面再异步挂载内容 frame”：这里短暂轮询等待内容 frame 出现
             long deadline = System.currentTimeMillis() + 8000;
             int tries = 0;
             while (System.currentTimeMillis() < deadline) {
@@ -379,6 +380,7 @@ class PlanRoutingSupport {
         java.util.LinkedHashMap<String, String> out = new java.util.LinkedHashMap<>();
         if (text == null) return out;
 
+        // 支持多种“名称-URL”表达方式，尽量从用户输入里构造稳定的入口映射表
         java.util.regex.Pattern lineLabelUrl = java.util.regex.Pattern.compile("(?m)^\\s*([^\\n:：]{1,40})\\s*[:：]\\s*(https?://[^\\s`'\"，。,）\\)]+)\\s*$");
         java.util.regex.Matcher m1 = lineLabelUrl.matcher(text);
         while (m1.find()) {
@@ -390,6 +392,7 @@ class PlanRoutingSupport {
             if (!label.isEmpty()) out.put(label, url);
         }
 
+        // 形如：https://xxx（订单管理页面）
         java.util.regex.Pattern urlParenLabel = java.util.regex.Pattern.compile("(https?://[^\\s`'\"，。,）\\)]+)\\s*[（(]\\s*([^\\)）\\n]{1,40})\\s*[)）]");
         java.util.regex.Matcher m2 = urlParenLabel.matcher(text);
         while (m2.find()) {
@@ -400,6 +403,7 @@ class PlanRoutingSupport {
             if (!label.isEmpty()) out.put(label, url);
         }
 
+        // 形如：https://xxx 用于 订单查询
         java.util.regex.Pattern urlUsedFor = java.util.regex.Pattern.compile("(https?://[^\\s`'\"，。,）\\)]+)[^\\n]{0,30}?(?:用于|用来|做|处理|完成)\\s*([^\\n，。,]{1,40})");
         java.util.regex.Matcher m3 = urlUsedFor.matcher(text);
         while (m3.find()) {
@@ -410,6 +414,7 @@ class PlanRoutingSupport {
             if (!label.isEmpty()) out.put(label, url);
         }
 
+        // 兜底：把所有 URL 收集到 URL_1/URL_2...，避免完全抽取不到入口地址
         java.util.regex.Pattern anyUrl = java.util.regex.Pattern.compile("https?://[^\\s`'\"，。,）\\)]+");
         java.util.regex.Matcher m4 = anyUrl.matcher(text);
         int idx = 1;
@@ -458,6 +463,7 @@ class PlanRoutingSupport {
         int ps = src.indexOf("PLAN_START");
         int pe = src.indexOf("PLAN_END");
         if (ps >= 0 && pe > ps) {
+            // 只保留 PLAN_START~PLAN_END 之间的计划正文，避免模型输出的其它内容干扰解析
             res.planText = src.substring(ps, pe + "PLAN_END".length());
         } else {
             res.planText = src;
@@ -465,8 +471,10 @@ class PlanRoutingSupport {
 
         String upper = src.toUpperCase();
         res.hasQuestion = upper.contains("QUESTION:");
+        // confirmed 的含义：模型认为计划已可执行（无 QUESTION 且无 UNKNOWN）
         res.confirmed = !upper.contains("STATUS: UNKNOWN") && !res.hasQuestion;
 
+        // 使用 Step N 作为分段标记，把整段 plan 切成多个 step block
         java.util.regex.Pattern stepHeader = java.util.regex.Pattern.compile("(?mi)^\\s*\\**Step\\s+(\\d+)\\**[:：]?\\s*$");
         java.util.regex.Matcher mh = stepHeader.matcher(src);
         java.util.List<Integer> stepStarts = new java.util.ArrayList<>();
@@ -480,6 +488,7 @@ class PlanRoutingSupport {
             }
         }
         if (stepNums.isEmpty()) {
+            // 找不到 step 头通常意味着模型没按格式输出，此时强制判为未确认
             res.confirmed = false;
             return res;
         }
@@ -492,6 +501,7 @@ class PlanRoutingSupport {
 
             AutoWebAgent.PlanStep step = new AutoWebAgent.PlanStep();
             step.index = stepNums.get(i);
+            // 解析每个 step 内的字段：Description/Target URL/Entry Point Action/Status
             step.description = matchFirst(block, "(?mi)^\\s*-\\s*\\**Description\\**\\s*[:：]\\s*(.*)$");
             step.targetUrl = matchFirst(block, "(?mi)^\\s*-\\s*\\**Target\\s+URL\\**\\s*[:：]\\s*(.*)$");
             step.entryAction = matchFirst(block, "(?mi)^\\s*-\\s*\\**Entry\\s+Point\\s+Action\\**\\s*[:：]\\s*(.*)$");
@@ -506,6 +516,7 @@ class PlanRoutingSupport {
         }
 
         if (!res.steps.isEmpty()) {
+            // 二次兜底：即使整体没有 STATUS: UNKNOWN，只要某个 step 的 status 含 UNKNOWN 也视为未确认
             boolean anyUnknown = false;
             for (AutoWebAgent.PlanStep s : res.steps) {
                 if (s.status != null && s.status.toUpperCase().contains("UNKNOWN")) {
@@ -534,6 +545,7 @@ class PlanRoutingSupport {
                 String targetUrl = step.targetUrl == null ? "" : step.targetUrl.trim();
                 String entryAction = step.entryAction == null ? "" : step.entryAction.trim();
 
+                // 通过一组启发式规则判断“是否需要用户补充入口地址”
                 boolean needs = false;
                 if (!status.isEmpty() && status.contains("UNKNOWN")) needs = true;
                 if (targetUrl.isEmpty()) needs = true;
@@ -551,6 +563,7 @@ class PlanRoutingSupport {
                 }
                 if (!needs) continue;
 
+                // 优先从 Description 提取更“像页面名称”的标签，用于提示用户补充 URL
                 String label = null;
                 String desc = step.description == null ? "" : step.description.trim();
                 if (!desc.isEmpty()) {

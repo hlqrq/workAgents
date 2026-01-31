@@ -222,9 +222,12 @@ public class WebDSL {
         boolean forcedA11y = m.group(1) != null && !m.group(1).trim().isEmpty();
         String alias = m.group(2) == null ? "" : m.group(2).toLowerCase();
         Map<String, String> attrs = parseA11yAttrs(selector);
+        // 对 button/link 等“既可能是 a11y 别名、也可能是 HTML 标签名”的场景做保护：
+        // 没有 label/placeholder/role 等强 a11y 特征时，避免误把普通 CSS selector 当成 a11y selector
         if (!forcedA11y && isAmbiguousTagAlias(alias) && !hasA11yOnlyAttrs(attrs)) return null;
         String role = aliasToRole(alias);
         
+        // 优先级：placeholder/label 更稳定（受 UI 文案影响小、定位更精准），其次走 role+name，最后退到纯 role
         String placeholder = firstNonEmpty(attrs.get("placeholder"));
         if (placeholder != null) {
             if (alias.equals("textbox") || alias.equals("combobox")) {
@@ -281,6 +284,7 @@ public class WebDSL {
                 || lower.contains("option")
                 || lower.contains("menuitem"))) return selector;
         
+        // 支持形如：textbox[label="用户名"] >> button[text="登录"] 的链式 selector
         if (trimmed.contains(">>")) {
             String[] parts = trimmed.split(">>");
             StringBuilder sb = new StringBuilder();
@@ -307,6 +311,7 @@ public class WebDSL {
         Map<String, String> attrs = parseA11yAttrs(segment);
         if (!forcedA11y && isAmbiguousTagAlias(aliasLower) && !hasA11yOnlyAttrs(attrs)) return segment;
         
+        // 将 a11y 别名降级为更通用的 CSS/role 选择器，提升可移植性与执行稳定性
         String alias = aliasLower;
         String role = aliasToRole(alias);
         
