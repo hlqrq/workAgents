@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -28,7 +29,8 @@ public class MultiModelE2ETestModeTest {
     static class RunnerConfig {
         List<String> models = new ArrayList<>();
         List<CaseInput> cases = new ArrayList<>();
-        AutoWebAgent.HtmlCaptureMode captureMode = AutoWebAgent.HtmlCaptureMode.RAW_HTML;
+        AutoWebAgent.HtmlCaptureMode captureMode = AutoWebAgent.HtmlCaptureMode.ARIA_SNAPSHOT;
+        boolean useVisualSupplement = false;
         boolean alsoStdout = true;
         boolean localAnalyze = false;
         String localAnalysisModel = LLMUtil.OLLAMA_MODEL_QWEN3_8B;
@@ -86,6 +88,7 @@ public class MultiModelE2ETestModeTest {
 
     public static void main(String[] args) throws Exception {
         RunnerConfig cfg = defaultConfig();
+        applyRuntimeOverrides(cfg);
 
         cfg.models.add(AutoWebAgent.normalizeModelKey("deepseek"));
         cfg.models.add(AutoWebAgent.normalizeModelKey("QWEN_MAX"));
@@ -185,6 +188,8 @@ public class MultiModelE2ETestModeTest {
         if (cfg.models == null || cfg.models.isEmpty()) throw new IllegalArgumentException("cfg.models is empty");
         if (cfg.cases == null || cfg.cases.isEmpty()) throw new IllegalArgumentException("cfg.cases is empty");
 
+        cleanupAutowebArtifacts();
+
         String ts = AutoWebAgent.newDebugTimestamp();
         Report report = new Report();
         report.ts = ts;
@@ -198,6 +203,7 @@ public class MultiModelE2ETestModeTest {
         GroovySupport.loadPrompts();
 
         BufferingLogger rootLogger = new BufferingLogger("[E2E] ", cfg.alsoStdout);
+        rootLogger.accept("E2E config: captureMode=" + report.captureMode + ", visualSupplement=" + cfg.useVisualSupplement);
         PlayWrightUtil.Connection connection = PlayWrightUtil.connectAndAutomate();
         if (connection == null || connection.browser == null) throw new RuntimeException("Failed to connect to browser.");
 
@@ -214,7 +220,7 @@ public class MultiModelE2ETestModeTest {
                     pageHandle = openPage(connection, c.entryUrl, rootLogger);
                     for (String model : cfg.models) {
                         try {
-                            List<ModelRunResult> rs = runSingleModelCase(model, c, pageHandle.page, cfg.captureMode, cfg.alsoStdout);
+                            List<ModelRunResult> rs = runSingleModelCase(model, c, pageHandle.page, cfg.captureMode, cfg.useVisualSupplement, cfg.alsoStdout);
                             if (rs != null) caseResult.runs.addAll(rs);
                         } catch (Exception ex) {
                             ModelRunResult r = new ModelRunResult();
@@ -315,6 +321,7 @@ public class MultiModelE2ETestModeTest {
             CaseInput c,
             com.microsoft.playwright.Page page,
             AutoWebAgent.HtmlCaptureMode captureMode,
+            boolean useVisualSupplement,
             boolean alsoStdout
     ) {
         List<ModelRunResult> outs = new ArrayList<>();
@@ -352,7 +359,16 @@ public class MultiModelE2ETestModeTest {
         }
 
         List<AutoWebAgent.HtmlSnapshot> snapshots = AutoWebAgent.prepareStepHtmls(page, out.planSteps, logger, captureMode);
-        String codePayload = AutoWebAgent.buildCodegenPayload(page, parsed.planText, snapshots);
+        String visualDescriptionForCodegen = null;
+        if (useVisualSupplement) {
+            try {
+                visualDescriptionForCodegen = AutoWebAgentUI.buildPageVisualDescription(page, logger);
+            } catch (Exception ex) {
+                logger.accept("视觉补充(CODEGEN)失败: " + ex.getMessage());
+                visualDescriptionForCodegen = "";
+            }
+        }
+        String codePayload = AutoWebAgent.buildCodegenPayload(page, parsed.planText, snapshots, useVisualSupplement ? visualDescriptionForCodegen : null);
         String code = AutoWebAgent.generateGroovyScript(out.prompt, codePayload, logger, model);
         code = code == null ? "" : code;
 
@@ -377,7 +393,21 @@ public class MultiModelE2ETestModeTest {
             }
             String freshCleanedHtml = AutoWebAgent.cleanCapturedContent(freshHtml, captureMode);
             String refineHint = buildRepairHint(out);
-            String refinePayload = AutoWebAgent.buildRefinePayload(page, parsed.planText, snapshots, freshCleanedHtml, out.prompt, refineHint);
+            String visualDescriptionForRefine = null;
+            if (useVisualSupplement) {
+                try {
+                    String cached = AutoWebAgentUI.readCachedPageVisualDescription(page, repairLogger);
+                    if (cached != null && !cached.isEmpty()) {
+                        visualDescriptionForRefine = cached;
+                    } else {
+                        visualDescriptionForRefine = AutoWebAgentUI.buildPageVisualDescription(page, repairLogger);
+                    }
+                } catch (Exception ex) {
+                    repairLogger.accept("视觉补充(REFINE_CODE)失败: " + ex.getMessage());
+                    visualDescriptionForRefine = "";
+                }
+            }
+            String refinePayload = AutoWebAgent.buildRefinePayload(page, parsed.planText, snapshots, freshCleanedHtml, out.prompt, refineHint, useVisualSupplement ? visualDescriptionForRefine : null);
             String execOutput = buildExecOutputForRepair(out);
 
             String refined = AutoWebAgent.generateRefinedGroovyScript(out.prompt, refinePayload, out.code, execOutput, refineHint, repairLogger, model);
@@ -434,6 +464,10 @@ public class MultiModelE2ETestModeTest {
         AutoWebAgent.ensureRootPageAtUrl(page, c.entryUrl, attemptLogger);
 
         String stepPrefix = out.repairAttempt ? ("[model=" + model + " REPAIR step=") : ("[model=" + model + " step=");
+        groovy.lang.Binding sharedBinding = new groovy.lang.Binding();
+        int baseTimeoutMs = com.qiyi.config.AppConfig.getInstance().getAutowebWaitForLoadStateTimeoutMs();
+        int boostedTimeoutMs = Math.max(60_000, baseTimeoutMs * 3);
+        int baseMaxRetries = 3;
 
         for (AutoWebAgent.PlanStep step : out.planSteps) {
             if (step == null) continue;
@@ -459,9 +493,23 @@ public class MultiModelE2ETestModeTest {
             }
 
             try {
+                String normalizedStepCode = promoteTopLevelDefs(stepCode, stepLogger);
                 AutoWebAgent.ContextWrapper bestContext = AutoWebAgent.waitAndFindContext(page, stepLogger);
                 Object executionTarget = bestContext == null ? page : bestContext.context;
-                AutoWebAgent.executeWithGroovy(stepCode, executionTarget, stepLogger);
+                try {
+                    AutoWebAgent.executeWithGroovy(normalizedStepCode, executionTarget, stepLogger, sharedBinding, baseTimeoutMs, baseMaxRetries);
+                } catch (Exception ex1) {
+                    if (isTimeoutException(ex1)) {
+                        stepLogger.accept("检测到超时，准备重试本步骤并提升默认超时到 " + boostedTimeoutMs + "ms");
+                        stepLogger.accept("等待 1000ms 后重新选择上下文并重试");
+                        try { page.waitForTimeout(1000); } catch (Exception ignored) {}
+                        AutoWebAgent.ContextWrapper bestContext2 = AutoWebAgent.waitAndFindContext(page, stepLogger);
+                        Object executionTarget2 = bestContext2 == null ? page : bestContext2.context;
+                        AutoWebAgent.executeWithGroovy(normalizedStepCode, executionTarget2, stepLogger, sharedBinding, boostedTimeoutMs, baseMaxRetries);
+                    } else {
+                        throw ex1;
+                    }
+                }
                 sr.ok = true;
                 sr.durationMs = System.currentTimeMillis() - t0;
                 sr.logTail = stepLogger.tail(200);
@@ -472,10 +520,44 @@ public class MultiModelE2ETestModeTest {
                 sr.error = reason;
                 sr.durationMs = System.currentTimeMillis() - t0;
                 sr.logTail = stepLogger.tail(200);
+                if (reason.contains("No such property:")) {
+                    try {
+                        java.util.Set<String> keys = sharedBinding.getVariables().keySet();
+                        stepLogger.accept("当前可用共享变量: " + String.join(",", keys));
+                    } catch (Exception ignored) {}
+                }
                 out.formattedErrors.add("步骤: " + stepIndex + ", 出错信息: " + reason);
             }
             out.stepResults.add(sr);
         }
+    }
+
+    private static boolean isTimeoutException(Throwable t) {
+        if (t == null) return false;
+        if (t instanceof com.microsoft.playwright.TimeoutError) return true;
+        String cn = t.getClass().getName();
+        if (cn != null && cn.contains("Timeout")) return true;
+        String msg = t.getMessage();
+        if (msg != null && (msg.contains("Timeout") || msg.contains("exceeded"))) return true;
+        Throwable c = t.getCause();
+        if (c != null && c != t) return isTimeoutException(c);
+        return false;
+    }
+
+    private static String promoteTopLevelDefs(String stepCode, java.util.function.Consumer<String> logger) {
+        if (stepCode == null) return "";
+        java.util.regex.Pattern p = java.util.regex.Pattern.compile("(?m)^def\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*=");
+        java.util.regex.Matcher m = p.matcher(stepCode);
+        java.util.List<String> vars = new java.util.ArrayList<>();
+        while (m.find()) {
+            String v = m.group(1);
+            if (v != null && !v.trim().isEmpty()) vars.add(v.trim());
+        }
+        String rewritten = p.matcher(stepCode).replaceAll("$1 =");
+        if (!vars.isEmpty() && logger != null) {
+            logger.accept("已将 top-level def 变量提升为共享变量: " + String.join(",", vars));
+        }
+        return rewritten;
     }
 
     private static List<String> safeLintErrors(String code) {
@@ -659,7 +741,8 @@ public class MultiModelE2ETestModeTest {
         RunnerConfig cfg = new RunnerConfig();
         cfg.models = parseCsv(System.getProperty("autoweb.e2e.models", "DEEPSEEK"));
         cfg.cases = loadCasesFromProperties();
-        cfg.captureMode = parseCaptureMode(System.getProperty("autoweb.e2e.captureMode", "RAW_HTML"));
+        cfg.captureMode = resolveCaptureModeFromSystemProperties();
+        cfg.useVisualSupplement = Boolean.parseBoolean(System.getProperty("autoweb.e2e.visualSupplement", "false"));
         cfg.alsoStdout = Boolean.parseBoolean(System.getProperty("autoweb.e2e.stdout", "true"));
         cfg.localAnalyze = Boolean.parseBoolean(System.getProperty("autoweb.e2e.localAnalyze", "false"));
         cfg.localAnalysisModel = System.getProperty("autoweb.e2e.localModel", LLMUtil.OLLAMA_MODEL_QWEN3_8B);
@@ -669,20 +752,56 @@ public class MultiModelE2ETestModeTest {
 
     private static RunnerConfig defaultConfig() {
         RunnerConfig cfg = new RunnerConfig();
-        cfg.models = java.util.Arrays.asList("DEEPSEEK", "GEMINI", "MOONSHOT", "OLLAMA_QWEN3_8B");
-        cfg.captureMode = AutoWebAgent.HtmlCaptureMode.RAW_HTML;
+        cfg.models = new ArrayList<>();
+        cfg.captureMode = AutoWebAgent.HtmlCaptureMode.ARIA_SNAPSHOT;
+        cfg.useVisualSupplement = false;
         cfg.alsoStdout = true;
         cfg.localAnalyze = false;
         cfg.localAnalysisModel = LLMUtil.OLLAMA_MODEL_QWEN3_8B;
         cfg.reportMaxChars = 8_000_000;
 
-        CaseInput c1 = new CaseInput();
-        c1.id = "case_1";
-        c1.entryUrl = "https://example.com";
-        c1.userTask = "把这里替换成你的用户任务";
-        cfg.cases.add(c1);
-
         return cfg;
+    }
+
+    private static void applyRuntimeOverrides(RunnerConfig cfg) {
+        if (cfg == null) return;
+        cfg.captureMode = resolveCaptureModeFromSystemProperties();
+        cfg.useVisualSupplement = Boolean.parseBoolean(System.getProperty("autoweb.e2e.visualSupplement", String.valueOf(cfg.useVisualSupplement)));
+    }
+
+    private static void cleanupAutowebArtifacts() {
+        Path base = Paths.get(System.getProperty("user.dir"), "autoweb");
+        deleteDirectoryContents(base.resolve("cache"));
+        deleteDirectoryContents(base.resolve("debug"));
+    }
+
+    private static void deleteDirectoryContents(Path dir) {
+        if (dir == null) return;
+        try {
+            if (!Files.exists(dir)) return;
+        } catch (Exception ignored) {
+            return;
+        }
+        try {
+            java.util.List<Path> paths = Files.walk(dir).sorted(Comparator.reverseOrder()).collect(Collectors.toList());
+            for (Path p : paths) {
+                if (p == null) continue;
+                if (p.equals(dir)) continue;
+                try {
+                    Files.deleteIfExists(p);
+                } catch (Exception ignored) {
+                }
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    private static AutoWebAgent.HtmlCaptureMode resolveCaptureModeFromSystemProperties() {
+        String mode = System.getProperty("autoweb.e2e.captureMode", "");
+        String v = mode == null ? "" : mode.trim();
+        if (!v.isEmpty()) return parseCaptureMode(v);
+        boolean simplified = Boolean.parseBoolean(System.getProperty("autoweb.e2e.simplifiedHtml", "true"));
+        return simplified ? AutoWebAgent.HtmlCaptureMode.ARIA_SNAPSHOT : AutoWebAgent.HtmlCaptureMode.RAW_HTML;
     }
 
     private static List<CaseInput> parseCasesJson(String json) {

@@ -3216,7 +3216,7 @@ class AutoWebAgentUI {
         }
     }
 
-    private static String buildPageVisualDescription(Page page, java.util.function.Consumer<String> uiLogger) {
+    static String buildPageVisualDescription(Page page, java.util.function.Consumer<String> uiLogger) {
         if (page == null) return "";
         String urlKey = safePageUrl(page);
         String baseUrlKey = PlanRoutingSupport.stripUrlQuery(urlKey == null ? "" : urlKey.trim());
@@ -3262,7 +3262,7 @@ class AutoWebAgentUI {
         }
     }
 
-    private static String readCachedPageVisualDescription(Page page, java.util.function.Consumer<String> uiLogger) {
+    static String readCachedPageVisualDescription(Page page, java.util.function.Consumer<String> uiLogger) {
         if (page == null) return "";
         String urlKey = safePageUrl(page);
         String baseUrlKey = PlanRoutingSupport.stripUrlQuery(urlKey == null ? "" : urlKey.trim());

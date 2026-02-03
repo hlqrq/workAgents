@@ -49,7 +49,7 @@ public class LLMUtilTest {
     public void testAnalyzeImageWithAliyun() {
         System.out.println("=== Testing analyzeImageWithAliyun ===");
         String imagePath = "/Users/cenwenchu/Desktop/1.png";
-        String prompt = "请你提取一下图片里面的页面布局和元素信息，方便大模型理解这个界面的结构和元素，保障对于筛选项和操作按钮的准确和完整，不用给建议，只需要称述实际存在的元素内容，在保障完整性的同时，尽量减少字符数";
+        String prompt = "针对图片的情况，创造2-3条测试用例，每条测试用例包含测试步骤";
         long startTime = System.currentTimeMillis();
         String response = LLMUtil.analyzeImageWithAliyun(new File(imagePath), prompt);
         long endTime = System.currentTimeMillis();

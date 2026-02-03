@@ -1617,6 +1617,17 @@ public class AutoWebAgent {
     }
 
     static void executeWithGroovy(String scriptCode, Object pageOrFrame, java.util.function.Consumer<String> logger) throws Exception {
+        executeWithGroovy(scriptCode, pageOrFrame, logger, null, null, null);
+    }
+
+    static void executeWithGroovy(
+            String scriptCode,
+            Object pageOrFrame,
+            java.util.function.Consumer<String> logger,
+            groovy.lang.Binding sharedBinding,
+            Integer dslDefaultTimeoutMs,
+            Integer dslMaxRetries
+    ) throws Exception {
         if (scriptCode == null) {
             if (logger != null) logger.accept("Groovy execution failed: scriptCode is null");
             throw new IllegalArgumentException("scriptCode is null");
@@ -1644,11 +1655,17 @@ public class AutoWebAgent {
         }
 
         try {
-            groovy.lang.Binding binding = new groovy.lang.Binding();
+            groovy.lang.Binding binding = sharedBinding == null ? new groovy.lang.Binding() : sharedBinding;
             binding.setVariable("page", pageOrFrame);
             
             // Inject WebDSL
             WebDSL dsl = new WebDSL(pageOrFrame, logger);
+            if (dslDefaultTimeoutMs != null && dslDefaultTimeoutMs > 0) {
+                dsl.withDefaultTimeout(dslDefaultTimeoutMs);
+            }
+            if (dslMaxRetries != null && dslMaxRetries > 0) {
+                dsl.withMaxRetries(dslMaxRetries);
+            }
             binding.setVariable("web", dsl);
             
             // Redirect print output to our UI logger
