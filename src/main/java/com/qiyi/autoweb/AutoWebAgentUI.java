@@ -229,7 +229,7 @@ class AutoWebAgentUI {
         chkUseA11yTree.addActionListener(e -> chkA11yInterestingOnly.setEnabled(chkUseA11yTree.isSelected()));
         JCheckBox chkUseVisualSupplement = new JCheckBox("使用视觉补充能力");
         chkUseVisualSupplement.setAlignmentX(Component.LEFT_ALIGNMENT);
-        chkUseVisualSupplement.setSelected(false);
+        chkUseVisualSupplement.setSelected(true);
         JPanel a11yPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
         a11yPanel.add(chkUseA11yTree);
         a11yPanel.add(chkUseVisualSupplement);
@@ -889,7 +889,14 @@ class AutoWebAgentUI {
                         try {
                             if (uiEpoch.get() != planEpoch) return;
                             refreshRootPageRefIfNeeded(rootPageRef, connectionRef, uiLogger, "修正规划前刷新页面");
-                            String currentUrlForRefine = safePageUrl(rootPageRef.get());
+                            boolean useVisualSupplement = chkUseVisualSupplement.isSelected();
+                            java.util.concurrent.atomic.AtomicReference<String> visualDescriptionRef = new java.util.concurrent.atomic.AtomicReference<>(null);
+                            Object visualDescriptionLock = new Object();
+                            traceVisual("PLAN_REFINE_THREAD_START",
+                                    "epochOk=" + (uiEpoch.get() == planEpoch) +
+                                            ", models=" + refineModels.size() +
+                                            ", useVisualSupplement=" + useVisualSupplement +
+                                            ", entryInputLen=" + (entryInput == null ? 0 : entryInput.length()));
                             java.util.concurrent.ExecutorService ex2 = java.util.concurrent.Executors.newFixedThreadPool(refineModels.size());
                             java.util.List<java.util.concurrent.Future<?>> fs2 = new java.util.ArrayList<>();
                             for (String modelName : refineModels) {
@@ -897,9 +904,54 @@ class AutoWebAgentUI {
                                     try {
                                         if (uiEpoch.get() != planEpoch) return;
                                         ModelSession session = sessionsByModel.computeIfAbsent(modelName, k -> new ModelSession());
+                                        traceVisual("PLAN_REFINE_MODEL_START",
+                                                "model=" + modelName +
+                                                        ", useVisualSupplement=" + useVisualSupplement +
+                                                        ", visualRefNull=" + (visualDescriptionRef.get() == null));
                                         uiLogger.accept("阶段开始: model=" + modelName + ", action=PLAN_REFINE");
                                         uiLogger.accept("PLAN_REFINE Debug: model=" + modelName + ", entryInput='" + entryInput + "'");
-                                        String payload = buildPlanRefinePayload(currentUrlForRefine, currentPrompt, entryInput);
+                                        String visualDescriptionFinal = null;
+                                        if (useVisualSupplement) {
+                                            String v = visualDescriptionRef.get();
+                                            if (v == null) {
+                                                synchronized (visualDescriptionLock) {
+                                                    v = visualDescriptionRef.get();
+                                                    if (v == null) {
+                                                        try {
+                                                            traceVisual("PLAN_REFINE_VISUAL_BEGIN", "model=" + modelName);
+                                                            ensureLiveRootPage(rootPageRef, connectionRef, forceNewPageOnExecute, hasExecuted, uiLogger);
+                                                            refreshRootPageRefIfNeeded(rootPageRef, connectionRef, uiLogger, "PLAN_REFINE 视觉补充截图前刷新页面");
+                                                            Page pageForVisual = rootPageRef.get();
+                                                            String targetUrlForVisual = PlanRoutingSupport.extractFirstUrlFromText(entryInput);
+                                                            if (targetUrlForVisual != null && !targetUrlForVisual.trim().isEmpty()) {
+                                                                traceVisual("PLAN_REFINE_VISUAL_TARGET", "targetUrl=" + PlanRoutingSupport.stripUrlQuery(targetUrlForVisual.trim()));
+                                                                PlanRoutingSupport.ensureRootPageAtUrl(pageForVisual, targetUrlForVisual.trim(), uiLogger);
+                                                            }
+                                                            traceVisual("PLAN_REFINE_VISUAL_PAGE",
+                                                                    "model=" + modelName +
+                                                                            ", pageNull=" + (pageForVisual == null) +
+                                                                            ", pageUrl=" + safePageUrl(pageForVisual));
+                                                            clearVisualCacheForPage(pageForVisual, uiLogger);
+                                                            if (uiLogger != null) uiLogger.accept("视觉补充(PLAN_REFINE): 开始截图");
+                                                            v = buildPageVisualDescription(pageForVisual, uiLogger);
+                                                            int len = v == null ? 0 : v.length();
+                                                            uiLogger.accept("视觉补充(PLAN_REFINE): 已生成页面描述（len=" + len + "）");
+                                                            traceVisual("PLAN_REFINE_VISUAL_DONE", "model=" + modelName + ", descLen=" + len);
+                                                        } catch (Exception ex) {
+                                                            uiLogger.accept("视觉补充(PLAN_REFINE)失败: " + ex.getMessage());
+                                                            traceVisual("PLAN_REFINE_VISUAL_ERROR",
+                                                                    "model=" + modelName + ", err=" + ex.getClass().getName() + ": " + (ex.getMessage() == null ? "" : ex.getMessage()));
+                                                            v = "";
+                                                        }
+                                                        if (v == null) v = "";
+                                                        visualDescriptionRef.set(v);
+                                                    }
+                                                }
+                                            }
+                                            visualDescriptionFinal = v;
+                                        }
+                                        String currentUrlForRefine = safePageUrl(rootPageRef.get());
+                                        String payload = buildPlanRefinePayload(currentUrlForRefine, currentPrompt, entryInput, useVisualSupplement ? visualDescriptionFinal : null);
                                         uiLogger.accept("PLAN_REFINE Payload Hash: " + payload.hashCode() + " | Length: " + payload.length());
                                         uiLogger.accept("阶段中: model=" + modelName + ", planMode=" + extractModeFromPayload(payload));
                                         String text = generateGroovyScript(currentPrompt, payload, uiLogger, modelName);
@@ -1097,7 +1149,16 @@ class AutoWebAgentUI {
                     uiLogger.accept("开始提交入口地址并修正规划...");
                     refreshRootPageRefIfNeeded(rootPageRef, connectionRef, uiLogger, "修正规划前刷新页面");
                     String currentUrlForRefine = safePageUrl(rootPageRef.get());
+                    boolean useVisualSupplement = chkUseVisualSupplement.isSelected();
+                    java.util.concurrent.atomic.AtomicReference<String> visualDescriptionRef = new java.util.concurrent.atomic.AtomicReference<>(null);
+                    Object visualDescriptionLock = new Object();
                     java.util.List<String> refineModels = new java.util.ArrayList<>(needList);
+                    traceVisual("PLAN_REFINE_THREAD_START",
+                            "epochOk=" + (uiEpoch.get() == planEpoch) +
+                                    ", models=" + refineModels.size() +
+                                    ", useVisualSupplement=" + useVisualSupplement +
+                                    ", currentUrlForRefine=" + (currentUrlForRefine == null ? "" : currentUrlForRefine) +
+                                    ", entryInputLen=" + (entryInput == null ? 0 : entryInput.length()));
                     new Thread(() -> {
                         try {
                             if (uiEpoch.get() != planEpoch) return;
@@ -1108,9 +1169,54 @@ class AutoWebAgentUI {
                                     try {
                                         if (uiEpoch.get() != planEpoch) return;
                                         ModelSession session = sessionsByModel.computeIfAbsent(modelName, k -> new ModelSession());
+                                        traceVisual("PLAN_REFINE_MODEL_START",
+                                                "model=" + modelName +
+                                                        ", useVisualSupplement=" + useVisualSupplement +
+                                                        ", visualRefNull=" + (visualDescriptionRef.get() == null));
                                         uiLogger.accept("阶段开始: model=" + modelName + ", action=PLAN_REFINE");
                                         uiLogger.accept("PLAN_REFINE Debug: model=" + modelName + ", entryInput='" + entryInput + "'");
-                                        String payload = buildPlanRefinePayload(currentUrlForRefine, currentPrompt, entryInput);
+                                        String visualDescriptionFinal = null;
+                                        if (useVisualSupplement) {
+                                            String v = visualDescriptionRef.get();
+                                            if (v == null) {
+                                                synchronized (visualDescriptionLock) {
+                                                    v = visualDescriptionRef.get();
+                                                    if (v == null) {
+                                                        try {
+                                                            traceVisual("PLAN_REFINE_VISUAL_BEGIN", "model=" + modelName);
+                                                            ensureLiveRootPage(rootPageRef, connectionRef, forceNewPageOnExecute, hasExecuted, uiLogger);
+                                                            refreshRootPageRefIfNeeded(rootPageRef, connectionRef, uiLogger, "PLAN_REFINE 视觉补充截图前刷新页面");
+                                                            Page pageForVisual = rootPageRef.get();
+                                                            String targetUrlForVisual = PlanRoutingSupport.extractFirstUrlFromText(entryInput);
+                                                            if (targetUrlForVisual != null && !targetUrlForVisual.trim().isEmpty()) {
+                                                                traceVisual("PLAN_REFINE_VISUAL_TARGET", "targetUrl=" + PlanRoutingSupport.stripUrlQuery(targetUrlForVisual.trim()));
+                                                                PlanRoutingSupport.ensureRootPageAtUrl(pageForVisual, targetUrlForVisual.trim(), uiLogger);
+                                                            }
+                                                            traceVisual("PLAN_REFINE_VISUAL_PAGE",
+                                                                    "model=" + modelName +
+                                                                            ", pageNull=" + (pageForVisual == null) +
+                                                                            ", pageUrl=" + safePageUrl(pageForVisual));
+                                                            clearVisualCacheForPage(pageForVisual, uiLogger);
+                                                            if (uiLogger != null) uiLogger.accept("视觉补充(PLAN_REFINE): 开始截图");
+                                                            v = buildPageVisualDescription(pageForVisual, uiLogger);
+                                                            int len = v == null ? 0 : v.length();
+                                                            uiLogger.accept("视觉补充(PLAN_REFINE): 已生成页面描述（len=" + len + "）");
+                                                            traceVisual("PLAN_REFINE_VISUAL_DONE", "model=" + modelName + ", descLen=" + len);
+                                                        } catch (Exception ex) {
+                                                            uiLogger.accept("视觉补充(PLAN_REFINE)失败: " + ex.getMessage());
+                                                            traceVisual("PLAN_REFINE_VISUAL_ERROR",
+                                                                    "model=" + modelName + ", err=" + ex.getClass().getName() + ": " + (ex.getMessage() == null ? "" : ex.getMessage()));
+                                                            v = "";
+                                                        }
+                                                        if (v == null) v = "";
+                                                        visualDescriptionRef.set(v);
+                                                    }
+                                                }
+                                            }
+                                            visualDescriptionFinal = v;
+                                        }
+                                        String currentUrlForRefine2 = safePageUrl(rootPageRef.get());
+                                        String payload = buildPlanRefinePayload(currentUrlForRefine2, currentPrompt, entryInput, useVisualSupplement ? visualDescriptionFinal : null);
                                         uiLogger.accept("PLAN_REFINE Payload Hash: " + payload.hashCode() + " | Length: " + payload.length());
                                         uiLogger.accept("阶段中: model=" + modelName + ", planMode=" + extractModeFromPayload(payload));
                                         String text = generateGroovyScript(currentPrompt, payload, uiLogger, modelName);
@@ -1335,6 +1441,7 @@ class AutoWebAgentUI {
                                                 v = visualDescriptionRef.get();
                                                 if (v == null) {
                                                     try {
+                                                        ensureLiveRootPage(rootPageRef, connectionRef, forceNewPageOnExecute, hasExecuted, uiLogger);
                                                         refreshRootPageRefIfNeeded(rootPageRef, connectionRef, uiLogger, "视觉补充截图前刷新页面");
                                                         v = buildPageVisualDescription(rootPageRef.get(), uiLogger);
                                                         int len = v == null ? 0 : v.length();
@@ -1724,11 +1831,12 @@ class AutoWebAgentUI {
                         int stepIndex = step.index;
                         String stepCode = buildStepExecutionCode(code, stepIndex);
                         if (stepCode == null || stepCode.trim().isEmpty()) {
-                            statusMap.put(stepIndex, false);
-                            errorMap.put(stepIndex, "未找到步骤代码");
+                            statusMap.put(stepIndex, true);
+                            errorMap.remove(stepIndex);
+                            stepCursorByModel.put(modelName, i + 1);
                             executionSummaryByModel.put(modelName, buildExecutionSummary(statusMap, errorMap));
                             SwingUtilities.invokeLater(refreshPlanCodePanel);
-                            uiLogger.accept("=== 分步执行失败: Step " + stepIndex + " | 未找到步骤代码 ===");
+                            uiLogger.accept("=== 分步执行跳过: Step " + stepIndex + " | 无可执行代码，视为成功 ===");
                             continue;
                         }
                         uiLogger.accept("=== 分步执行开始: Step " + stepIndex + " ===");
@@ -1895,10 +2003,11 @@ class AutoWebAgentUI {
                         int stepIndex = step.index;
                         String stepCode = buildStepExecutionCode(code, stepIndex);
                         if (stepCode == null || stepCode.trim().isEmpty()) {
-                            statusMap.put(stepIndex, false);
-                            errorMap.put(stepIndex, "未找到步骤代码");
+                            statusMap.put(stepIndex, true);
+                            errorMap.remove(stepIndex);
+                            stepCursorByModel.put(modelName, i + 1);
                             executionSummaryByModel.put(modelName, buildExecutionSummary(statusMap, errorMap));
-                            uiLogger.accept("=== 分步执行失败: Step " + stepIndex + " | 未找到步骤代码 ===");
+                            uiLogger.accept("=== 分步执行跳过: Step " + stepIndex + " | 无可执行代码，视为成功 ===");
                             SwingUtilities.invokeLater(refreshPlanCodePanel);
                             continue;
                         }
@@ -3058,6 +3167,56 @@ class AutoWebAgentUI {
         }
     }
 
+    private static final Object VISUAL_TRACE_LOCK = new Object();
+
+    private static void traceVisual(String stage, String msg) {
+        try {
+            String line = java.time.LocalDateTime.now() +
+                    " | " + (stage == null ? "" : stage) +
+                    " | " + (msg == null ? "" : msg) +
+                    " | thread=" + Thread.currentThread().getName();
+            synchronized (VISUAL_TRACE_LOCK) {
+                java.nio.file.Path dir = java.nio.file.Paths.get(System.getProperty("user.dir"), "autoweb", "debug");
+                java.nio.file.Files.createDirectories(dir);
+                java.nio.file.Path file = dir.resolve("visual_trace.log");
+                java.nio.file.Files.writeString(
+                        file,
+                        line + "\n",
+                        java.nio.charset.StandardCharsets.UTF_8,
+                        java.nio.file.StandardOpenOption.CREATE,
+                        java.nio.file.StandardOpenOption.WRITE,
+                        java.nio.file.StandardOpenOption.APPEND
+                );
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    private static void clearVisualCacheForPage(Page page, java.util.function.Consumer<String> uiLogger) {
+        if (page == null) return;
+        try {
+            java.nio.file.Path cacheDir = java.nio.file.Paths.get(System.getProperty("user.dir"), "autoweb", "cache");
+            java.nio.file.Files.createDirectories(cacheDir);
+            String urlKey = safePageUrl(page);
+            String baseUrlKey = PlanRoutingSupport.stripUrlQuery(urlKey == null ? "" : urlKey.trim());
+            if (baseUrlKey == null || baseUrlKey.trim().isEmpty()) return;
+            traceVisual("VISUAL_CACHE_CLEAR_BEGIN", "baseUrlKey=" + baseUrlKey);
+            String descKey = sha256Hex("VISUAL_DESC_V4|" + baseUrlKey);
+            try {
+                java.nio.file.Files.deleteIfExists(cacheDir.resolve("visual_desc_" + descKey + ".txt"));
+            } catch (Exception ignored) {}
+            String shotKey = sha256Hex("VISUAL_V2|" + baseUrlKey);
+            for (int i = 1; i <= 5; i++) {
+                try {
+                    java.nio.file.Files.deleteIfExists(cacheDir.resolve("visual_" + shotKey + "_" + i + ".png"));
+                } catch (Exception ignored) {}
+            }
+            if (uiLogger != null) uiLogger.accept("视觉补充: 已清理缓存并强制重新截图");
+            traceVisual("VISUAL_CACHE_CLEAR_DONE", "baseUrlKey=" + baseUrlKey);
+        } catch (Exception ignored) {
+        }
+    }
+
     private static java.util.List<java.io.File> captureMultiScreenScreenshots(Page page, java.util.function.Consumer<String> uiLogger) {
         if (page == null) return java.util.Collections.emptyList();
         synchronized (PLAYWRIGHT_LOCK) {
@@ -3066,6 +3225,7 @@ class AutoWebAgentUI {
                 java.nio.file.Files.createDirectories(cacheDir);
                 String urlKey = safePageUrl(page);
                 String baseUrlKey = PlanRoutingSupport.stripUrlQuery(urlKey == null ? "" : urlKey.trim());
+                traceVisual("VISUAL_SCREENSHOT_START", "baseUrlKey=" + baseUrlKey + ", urlKey=" + (urlKey == null ? "" : urlKey));
                 String cacheKey = sha256Hex("VISUAL_V2|" + baseUrlKey);
                 int maxScreens = 2;
                 java.nio.file.Path p1 = cacheDir.resolve("visual_" + cacheKey + "_1.png");
@@ -3080,6 +3240,7 @@ class AutoWebAgentUI {
                     }
                 } catch (Exception ignored) {}
                 if (reuse) {
+                    traceVisual("VISUAL_SCREENSHOT_REUSE", "baseUrlKey=" + baseUrlKey);
                     java.util.List<java.io.File> out = new java.util.ArrayList<>();
                     for (int i = 1; i <= maxScreens; i++) {
                         java.nio.file.Path pi = cacheDir.resolve("visual_" + cacheKey + "_" + i + ".png");
@@ -3156,6 +3317,7 @@ class AutoWebAgentUI {
                     java.nio.file.Path pi = cacheDir.resolve("visual_" + cacheKey + "_" + i + ".png");
                     page.screenshot(new com.microsoft.playwright.Page.ScreenshotOptions().setPath(pi));
                     if (uiLogger != null) uiLogger.accept("视觉补充: 已截图 " + i + " -> " + pi.toAbsolutePath());
+                    traceVisual("VISUAL_SCREENSHOT_SAVED", "index=" + i + ", path=" + pi.toAbsolutePath());
                     out.add(pi.toFile());
 
                     double y = 0;
@@ -3192,6 +3354,7 @@ class AutoWebAgentUI {
                                 "  window.scrollTo(0, yy);\n" +
                                 "}", targetY);
                         page.waitForTimeout(350);
+                        traceVisual("VISUAL_SCROLL", "targetY=" + targetY + ", hasMore=true");
                     } catch (Exception ignored) {
                     }
                 }
@@ -3211,6 +3374,7 @@ class AutoWebAgentUI {
                 return out;
             } catch (Exception ex) {
                 if (uiLogger != null) uiLogger.accept("视觉补充: 截图失败: " + ex.getMessage());
+                traceVisual("VISUAL_SCREENSHOT_ERROR", ex.getClass().getName() + ": " + (ex.getMessage() == null ? "" : ex.getMessage()));
                 return java.util.Collections.emptyList();
             }
         }
@@ -3220,6 +3384,7 @@ class AutoWebAgentUI {
         if (page == null) return "";
         String urlKey = safePageUrl(page);
         String baseUrlKey = PlanRoutingSupport.stripUrlQuery(urlKey == null ? "" : urlKey.trim());
+        traceVisual("VISUAL_DESC_START", "baseUrlKey=" + baseUrlKey + ", urlKey=" + (urlKey == null ? "" : urlKey));
         String cacheKey = sha256Hex("VISUAL_DESC_V4|" + baseUrlKey);
         java.nio.file.Path cacheDir = java.nio.file.Paths.get(System.getProperty("user.dir"), "autoweb", "cache");
         java.nio.file.Path descPath = cacheDir.resolve("visual_desc_" + cacheKey + ".txt");
@@ -3232,6 +3397,7 @@ class AutoWebAgentUI {
                     String cached = java.nio.file.Files.readString(descPath, java.nio.charset.StandardCharsets.UTF_8);
                     if (cached != null && !cached.trim().isEmpty()) {
                         if (uiLogger != null) uiLogger.accept("视觉补充: 复用本地描述缓存");
+                        traceVisual("VISUAL_DESC_REUSE", "descPath=" + descPath.toAbsolutePath());
                         return cached.trim();
                     }
                 }
@@ -3239,6 +3405,7 @@ class AutoWebAgentUI {
         } catch (Exception ignored) {}
 
         java.util.List<java.io.File> images = captureMultiScreenScreenshots(page, uiLogger);
+        traceVisual("VISUAL_DESC_IMAGES", "count=" + (images == null ? 0 : images.size()));
         if (images == null || images.isEmpty()) return "";
         String prompt = AppConfig.getInstance().getAutowebVisualPrompt();
         try {
@@ -3249,15 +3416,18 @@ class AutoWebAgentUI {
             }
             String r = LLMUtil.analyzeImageWithAliyun(srcs, prompt);
             String out = r == null ? "" : r.trim();
+            traceVisual("VISUAL_DESC_LLM_DONE", "len=" + out.length());
             if (!out.isEmpty()) {
                 try {
                     java.nio.file.Files.createDirectories(cacheDir);
                     java.nio.file.Files.writeString(descPath, out, java.nio.charset.StandardCharsets.UTF_8);
+                    traceVisual("VISUAL_DESC_SAVED", "descPath=" + descPath.toAbsolutePath());
                 } catch (Exception ignored) {}
             }
             return out;
         } catch (Exception ex) {
             if (uiLogger != null) uiLogger.accept("视觉补充: 图片分析失败: " + ex.getMessage());
+            traceVisual("VISUAL_DESC_ERROR", ex.getClass().getName() + ": " + (ex.getMessage() == null ? "" : ex.getMessage()));
             return "";
         }
     }

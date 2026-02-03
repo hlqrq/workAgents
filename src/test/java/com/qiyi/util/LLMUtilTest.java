@@ -49,7 +49,8 @@ public class LLMUtilTest {
     public void testAnalyzeImageWithAliyun() {
         System.out.println("=== Testing analyzeImageWithAliyun ===");
         String imagePath = "/Users/cenwenchu/Desktop/1.png";
-        String prompt = "针对图片的情况，创造2-3条测试用例，每条测试用例包含测试步骤";
+        String userPrompt = "请帮我查询待发货所有的订单（包括多页的数据），并且输出订单的所有信息，输出格式为：\\\"列名:列内容（去掉回车换行）\\\"，然后用\\\"｜\\\"分隔，列的顺序保持表格的顺序，一条记录一行。输出以后，回到第一条订单，选中订单，然后点击审核推单，读取弹出页面的成功和失败的笔数，失败笔数大于0，页面上获取失败原因，也一起输出";
+        String prompt = "针对图片的情况，把下面这段用户需求，分解为多个可执行的步骤，最终会用于大模型生成代码，只需要拆分出具体步骤。用户需求为：" + userPrompt;
         long startTime = System.currentTimeMillis();
         String response = LLMUtil.analyzeImageWithAliyun(new File(imagePath), prompt);
         long endTime = System.currentTimeMillis();
