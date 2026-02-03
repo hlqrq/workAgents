@@ -1306,7 +1306,7 @@ public class WebDSL {
     }
     
     public void selectDropdown(String dropdownNameOrSelector, String optionText) {
-        selectDropdown(dropdownNameOrSelector, optionText, 12);
+        selectDropdown(dropdownNameOrSelector, optionText, 3);
     }
     
     public void selectDropdown(String dropdownNameOrSelector, String optionText, int maxScrolls) {
