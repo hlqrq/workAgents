@@ -14,16 +14,30 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
+/**
+ * 多模型端到端自动化回归执行器（E2E Runner）。
+ *
+ * 用途：
+ * 1) 使用同一批 Case（入口 URL + 用户任务）对多个模型进行 Plan/Code/执行对比；
+ * 2) 采集每一步执行的结果、耗时与日志片段，汇总生成可落盘的 JSON 报告；
+ * 3) 可选：将报告压缩后喂给本地模型做“离线分析”（定位系统性失败点与改进建议）。
+ *
+ * 产物：
+ * - 报告通过 {@link StorageSupport#saveDebugArtifact(String, String, String, String, String, java.util.function.Consumer, int)}
+ *   写入 autoweb/debug（文件名含 ts/model/mode/kind）。
+ */
 public class MultiModelAutoRun {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create();
 
+    /**
+     * Runner 的运行参数集合。
+     * 注意：该类默认值偏向回归测试场景（captureMode=ARIA_SNAPSHOT、useVisualSupplement=true）。
+     */
     static class RunnerConfig {
         List<String> models = new ArrayList<>();
         List<CaseInput> cases = new ArrayList<>();
@@ -35,12 +49,22 @@ public class MultiModelAutoRun {
         int reportMaxChars = 8_000_000;
     }
 
+    /**
+     * 单个测试用例输入（Case）。
+     *
+     * - entryUrl：入口地址（用于导航/确保登录态后回到入口）
+     * - userTask：自然语言任务描述（用于生成 Plan/Code）
+     */
     static class CaseInput {
         String id;
         String entryUrl;
         String userTask;
     }
 
+    /**
+     * 单步（Plan Step）执行的结果。
+     * 用于在报告中展示“哪一步失败/耗时多少/错误是什么/日志尾部是什么”。
+     */
     static class StepExecutionResult {
         int stepIndex;
         boolean ok;
@@ -49,6 +73,10 @@ public class MultiModelAutoRun {
         String logTail;
     }
 
+    /**
+     * 某个模型在某个 Case 下的一次运行结果（可包含重试/修正）。
+     * plan/code/lintErrors/stepResults 会写入最终报告。
+     */
     static class ModelRunResult {
         String model;
         String prompt;
@@ -67,6 +95,9 @@ public class MultiModelAutoRun {
         String runLogTail;
     }
 
+    /**
+     * Case 级别的汇总（包含多个模型的运行结果）。
+     */
     static class CaseRunResult {
         String id;
         String entryUrl;
@@ -74,6 +105,11 @@ public class MultiModelAutoRun {
         List<ModelRunResult> runs;
     }
 
+    /**
+     * 最终报告结构。
+     * - analysisPrompt：给本地模型做离线分析的提示词
+     * - localAnalysis：本地模型返回的分析文本（可选）
+     */
     static class Report {
         String ts;
         List<String> models;
@@ -84,6 +120,10 @@ public class MultiModelAutoRun {
         String localAnalysis;
     }
 
+    /**
+     * 命令行入口：构建默认配置、装载 models/cases，并执行一次完整回归。
+     * 产物写入 autoweb/debug，便于在 CI 或本地对比模型差异。
+     */
     public static void main(String[] args) throws Exception {
         RunnerConfig cfg = defaultConfig();
         applyRuntimeOverrides(cfg);
@@ -126,6 +166,10 @@ public class MultiModelAutoRun {
         private final boolean alsoStdout;
         private final String prefix;
 
+        /**
+         * @param prefix 日志行前缀（用于区分 model/阶段）
+         * @param alsoStdout 是否同时输出到标准输出
+         */
         BufferingLogger(String prefix, boolean alsoStdout) {
             this.prefix = prefix == null ? "" : prefix;
             this.alsoStdout = alsoStdout;

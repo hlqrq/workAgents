@@ -3,8 +3,17 @@ package com.qiyi.autoweb;
 import com.microsoft.playwright.Page;
 
 /**
- * 调试与存储辅助工具
- * 负责落盘、脱敏、字节统计、URL 读取等功能
+ * 调试与存储辅助工具。
+ *
+ * 约定目录：
+ * - autoweb/debug：保存 payload/prompt/response/异常等调试产物（便于复盘与对齐模型差异）
+ * - autoweb/cache：保存按 URL/入口动作/captureMode 归一化后的页面快照（减少重复采集）
+ *
+ * 核心能力：
+ * - 保存调试文件：统一文件命名与最大长度截断；
+ * - 脱敏：对 token/apiKey/Authorization 等字段做正则脱敏；
+ * - 统计与摘要：输出 payload/prompt 字节数、payload 结构摘要；
+ * - URL 读取：通过锁保护 Playwright 的跨线程访问。
  */
 class StorageSupport {
     /**
@@ -241,7 +250,8 @@ class StorageSupport {
     }
 
     /**
-     * 安全读取当前页面 URL
+     * 安全读取当前页面 URL。
+     * 核心逻辑：用 {@link AutoWebAgent#PLAYWRIGHT_LOCK} 串行化访问，避免跨线程直接调用 Playwright 导致不稳定。
      */
     static String safePageUrl(Page page) {
         if (page == null) return "";
