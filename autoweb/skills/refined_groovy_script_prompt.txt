@@ -1,0 +1,157 @@
+
+You previously generated Groovy Playwright automation code for the following task.
+Original User Task:
+%s
+
+Context Payload (may include MODE, plan, and/or cleaned HTML snapshots):
+%s
+
+Previous Groovy Code:
+%s
+
+Execution Output / Error Log:
+%s
+
+Additional User Hint For Fixing The Code:
+%s
+
+CRITICAL FIX REQUIREMENTS:
+- **Optimization Goal**: Use the `web` DSL variable for robust interaction.
+- **Language**: All non-code commentary (Plan, reasoning, notes) and `web.log()` messages SHOULD be in Chinese.
+- **Safety Rule**: 禁止使用 while(true) 或无限循环；改用有界循环或 DSL 的 extractTableData/locateItem/withMaxRetries 等。
+- **Refine Modes (Required)**:
+  - The Context Payload may contain `MODE: PLAN_REFINE` or `MODE: REFINE_CODE`.
+  - **MODE: PLAN_REFINE**:
+    - The "Previous Groovy Code" is a plan block (not executable code).
+    - Use "Additional User Hint" to clarify missing URLs/entry actions.
+    - If Context Payload contains `USER_PROVIDED_URLS:` (e.g. `- 订单管理: https://...`), you MUST treat them as authoritative.
+      - Prefer mapping by label/intent to each step `Description`.
+      - If a hint says a URL is used for a specific task, bind that URL to the step and set `Status: CONFIRMED` for URL part.
+    - If Context Payload contains `USER_INPUT_RAW: ...`, you MUST parse it as natural language.
+      - If it contains a URL (even without a label) or describes an entry point, extract it and update the plan.
+      - Treat it as a direct instruction from the user (e.g., "Use https://example.com for step 1").
+    - CRITICAL: If a user provided URL is present (via USER_PROVIDED_URL or extracted from USER_INPUT_RAW), you MUST assume the entry point is fully resolved and set Status: CONFIRMED for the entry step. Do NOT ask confirmation questions (e.g. "is this the right page?", "is it default selected?") - instead, generate a step to "Ensure/Verify X is selected" and mark it CONFIRMED. We must proceed to CODEGEN to verify via HTML.
+    - Output the updated FINAL PLAN ONLY (block comment). Do NOT generate executable code.
+    - If still missing info, keep `Status: UNKNOWN` and ask again in `QUESTION:`.
+  - **MODE: REFINE_CODE**:
+    - The Context Payload will include the original PLAN and per-step cleaned HTML snapshots.
+    - Use the full context (plan + per-step HTML + previous code + execution output + new hint) to generate the improved Groovy code.
+    - OUTPUT MUST BE A COMPLETE, STANDALONE SCRIPT:
+      - Return the ENTIRE updated Groovy script, not a diff, not a snippet, and not "only the new step".
+      - Do NOT say "步骤1-5保留" without actually outputting them; you MUST output the full code including all steps.
+      - Do NOT assume earlier steps have already executed in this run; each execution starts from the current browser state.
+    - IMPORTANT: The original PLAN may have been created without page HTML/DSL context.
+      - You MAY refine/expand the Plan comments (selectors, entry actions, missing sub-steps) based on the HTML snapshots, DSL reference, and execution errors.
+      - Keep the Plan comments consistent with the final code you output.
+- **Pagination Requirement**: If the User Task asks for "all" records (e.g. "查询所有", "query all"), you MUST check for pagination (Next button or Infinite Scroll) and use the appropriate DSL method (`extractPagesTable` or `extractTableData`). Do NOT just extract the first page unless no pagination exists.
+-  All non-code commentary (Fix Plan, reasoning, notes) MUST be output as Groovy line comments starting with `//` or `/* */`. Do NOT output bare text.
+- **Variable Rule**: Do NOT redeclare variables.
+- **No Translation**: Do NOT translate keywords from the User Task or Hint. Use them exactly as provided.
+- **Text Priority**: When the user provides a visible keyword, ALWAYS prefer locating it by that exact text over internal IDs or inferred English values.
+- **Accessibility Tree 模式**: 如果 Context Payload 看起来是 Accessibility Tree/ARIA Snapshot（包含 role/name、AXTree、ariaSnapshot 结构或纯语义节点文本），必须遵循：
+  - 优先基于可见文本/role/name 的选择方式（如 `text='...'` 或 `:has-text('...')`），避免深层 DOM 链路或未出现在快照中的属性。
+  - 优先使用 `web.clickButton('文本')`、`web.waitFor('text=...')`、`web.waitForLoadState()`；页面跳转或弹窗出现后先等待再交互。
+  - 标签页切换优先用 `web.clickTab('待发货')`；不要用 `web.click('text=待发货')` 乱点。
+  - 弹窗/对话框关闭优先用 `web.closeModal()` / `web.dismissPopups()`；不要手写点“×/关闭”。
+  - 当中文文本可能被空格拆开时，使用正则文本选择器（如 `text=/搜\\s*索/`）。
+  - 尽量避免使用 `nth` 或基于索引的定位，除非快照中只有索引可用且已明确。
+- **Popup/Modal Data**: When extracting info (counts, messages, reasons) from a modal, ALWAYS prefer `extractModalData` with regex for ALL fields. Do NOT try to `getText` on sub-elements (like `.error-message`) unless regex fails, as structure is often flat.
+  - Regex must include a capturing group `()`.
+  - **Robust Regex**: Text often lacks standard separators or has erratic spacing. ALWAYS make separators (like colons) optional (e.g. `[:：\s]*`) to handle various formats.
+  - Example: `def res = web.extractModalData('.modal', ['key': 'LabelText[:：\s]*(CapturedValue)'])`
+- Do NOT wait for hidden inputs to be visible; click the label or parent (the DSL handles this).
+- For Chinese UI texts that may contain random spaces (e.g. "重 置", "搜 索"):
+  - Prefer regex text selectors to ignore whitespace, e.g. `text=/重\\s*置/`, `text=/搜\\s*索/`, `text=/已\\s*发\\s*货/`.
+- For dropdown / combobox / filter option selection by visible label, ALWAYS use `web.selectDropdown("控件名称", "选项文本")` as the ONLY allowed pattern.
+  - 如果旧代码是“先 click 打开下拉，再 click listbox/option 选项”（例如 `web.click('text=\"资料已完善的平台\"')` + `web.click('div[role=\"listbox\"] >> text=\"淘宝\"')`），必须改写为：`web.selectDropdown("资料已完善的平台", "淘宝")`。
+  - 不允许保留 `div[role="listbox"]` / `[role=listbox]` / `[role=option]` 这类手写点击流程；统一用 `selectDropdown`。
+- For table operations, PREFER per-row CSS selectors with `:nth-child()` (e.g., `".art-table-row:nth-child(i+1) td:nth-child(3)"`) instead of long `>> nth=` pipelines, which are fragile and often cause timeouts.
+- For flaky elements, increase robustness with `web.withMaxRetries(5)` or `web.clickWithRetry('#selector')`. Adjust timeouts via `web.withDefaultTimeout(40000)`.
+
+[CODEGEN_ONLY_START]
+SECTION 2: DYNAMIC LISTS, TABLES & PAGINATION
+Use high-level DSL methods. Avoid manual scroll loops and DOM re-reading after extraction.
+
+- **Row Text Output**: `web.extractFirstPageRows(containerSelector, rowSelector, cellSelector)` then output the returned list.
+- **Structured Output**: 
+  - For single page: Use `web.extractFirstPageTable(containerSelector, rowSelector, columnsMap)`.
+  - For infinite scroll: Use `web.extractTableData(containerSelector, rowSelector, limit, columnsMap)`.
+  - **For Standard Pagination (Next Button)**: Use `web.extractPagesTable(containerSelector, rowSelector, columnsMap, nextBtnSelector, maxPages)`.
+    - `maxPages`: Max pages to scrape (e.g. 10). 
+    - `nextBtnSelector`: Selector for the 'Next' button.
+    - The method automatically handles clicking, waiting, and checking for disabled state.
+  - BEST PRACTICE: `columnsMap` keys MUST be the desired output field names (e.g., `"订单号"`, `"状态"`), and values MUST be relative selectors (e.g., `"td:nth-child(2)"`, `".status-label"`).
+  - If you only know column headers, map by header to selector using `td:nth-child(n)` after counting header positions.
+  - Avoid numeric keys like `"1"` unless you will read the same numeric keys in output.
+  - **CRITICAL**: Use the RETURNED data list. Do NOT iterate the count and query `nth-child` again, as virtual rows may be unloaded.
+- **Locate Item**: `web.locateItem(containerSelector, rowSelector, textToFind)`.
+
+API REFERENCE (DSL - variable 'web'):
+  - `click(selector)`, `clickButton(text)`, `clickTab(text)`: Click element/tab.
+  - `clickWithRetry(selector)`: Click with retries based on `withMaxRetries`.
+  - `type(selector, text)`: Type text.
+  - `withDefaultTimeout(ms)`: Set default wait timeout.
+  - `withMaxRetries(n)`: Set retry count for actions.
+  - `check(selector)`, `uncheck(selector)`: For checkboxes/radios.
+  - `isChecked(selector)`: Returns boolean.
+  - `selectOption(selector, valueOrLabel)`: For standard `<select>`.
+  - `selectDropdown(dropdownNameOrSelector, optionText)`: For common dropdown/combobox components (e.g. AntD/Element UI).
+  - `getText(selector)`: Get inner text.
+  - `getAllText(selector)`: Get list of texts for all matching elements.
+  - `count(selector)`: Get number of matching elements.
+  - `waitFor(selector)`: Wait for element to appear (default 30s).
+  - `wait(millis)`: Pause execution.
+  - `hover(selector)`: Hover mouse over element.
+  - `scrollIntoView(selector)`: Scroll to element.
+  - `mouseWheel(selector, deltaY)`: Hover over selector and scroll wheel (robust for virtual lists).
+  - `press(selector, key)`: Press keyboard key (e.g. 'Enter') on element.
+  - `scrollToBottom()`, `scrollToBottom(selector)`: Scroll window or element to bottom.
+  - `scrollToTop(selector)`: Scroll element to top (CRITICAL for virtual lists before extraction).
+  - `scrollBy(selector, amount)`: Scroll element by amount pixels (e.g. 500).
+  - `log(msg)`: Log message.
+  - `findRowIndex(rowSelector, cellText)`: Find row index containing text.
+  - `extractList(containerSelector, rowSelector, limit)`: **POWERFUL**. Scrolls, extracts, deduplicates, and resets to top. Returns `List<String>`.
+  - `extractTableData(containerSelector, rowSelector, limit, columnsMap)`: **POWERFUL**. Returns `List<Map<String, String>>`.
+  - `extractFirstPageRows(containerSelector, rowSelector, cellSelector)`: Returns first-page row texts joined by commas.
+  - `extractFirstPageTable(containerSelector, rowSelector, columnsMap)`: Returns first-page structured rows.
+  - `extractPagesTable(containerSelector, rowSelector, columnsMap, nextBtnSelector, maxPages)`: **POWERFUL**. Extracts data across multiple pages by clicking 'next' button.
+  - `locateItem(containerSelector, rowSelector, textToFind)`: **POWERFUL**. Scrolls until item is found and visible. Returns `boolean`.
+  - `extractModalData(modalSelector, regexPatternsMap)`: **POWERFUL**. Extracts data from a popup using regex. Example: `web.extractModalData('.modal', ['success': '成功.*?(\\d+)'])`.
+  - `closeModal()`: Tries to close the currently visible modal/dialog (with fallbacks).
+  - `closeModal(modalSelector, closeBtnSelector)`: Closes a modal and waits for it to vanish.
+  - `dismissPopups()`: Tries to dismiss common popups/notifications (with fallbacks).
+  - `dismissPopups(selectors...)`: Try to click specified selectors to close ads/notifications.
+  - `open(url)`: Opens a URL.
+  - `waitForNewPage(triggerAction)`: **POWERFUL**. Returns new WebDSL for new window. Example: `def newPage = web.waitForNewPage { web.click('#link') }`.
+  - `waitForNavigation(triggerAction)`: Waits for navigation after action.
+  - `waitForUrl(regex)`: Waits for URL match.
+  - `waitForLoadState()`: Waits for network idle.
+  - `getCurrentUrl()`: Get URL.
+  - `getTitle()`: Get Title.
+  - `navigate(url)`: Navigates to a specific URL.
+  - `reload()`: Reloads the current page.
+  - `goBack()`: Navigates back in history.
+  - `returnToFirstPage()`: **RECOMMENDED**. Tries to click "Page 1" button; if hidden, tries iterative "Previous" button clicks; falls back to reload. Handles waiting for page refresh.
+- PREFER these DSL methods over raw Playwright calls.
+
+SECTION 4: RETURN TO START & STATE MANAGEMENT
+- If the task requires returning to the first item (e.g. "回到第一条") after processing/pagination:
+  - If you have paginated or scrolled, the first item is likely no longer visible.
+  - **USE `web.returnToFirstPage()`**. This smartly clicks "Page 1" or reloads if necessary.
+  - Do NOT manually click "1" unless specific logic requires it.
+  - Do NOT assume `web.scrollToTop()` is enough if you are on page 5.
+
+[CODEGEN_ONLY_END]
+
+FINAL OUTPUT RULES:
+- If `MODE: PLAN_REFINE`: Output ONLY the updated Plan block comment (and `QUESTION:` if needed). No executable Groovy statements.
+- If `MODE: REFINE_CODE`: Output ONLY the final Groovy code (including the Plan comments).
+- Do NOT wrap any output in Markdown code fences (no ```), and do NOT output Markdown.
+
+Example Format (plain text, no Markdown fences):
+// FIX PLAN:
+// 1. Selector for 'Login' failed. Use 'button[name="login"]' instead.
+// 2. Add wait before clicking.
+web.log("Retrying login...")
+web.waitFor('button[name=\"login\"]')
+web.click('button[name=\"login\"]')

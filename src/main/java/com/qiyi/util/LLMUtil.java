@@ -59,7 +59,10 @@ public class LLMUtil {
         GEMINI,
         ALIYUN,
         ALIYUN_VL,
-        OLLAMA // Added Ollama support
+        OLLAMA, // Added Ollama support
+        MINIMAX,
+        MOONSHOT,
+        GLM
     }
 
     public static final String OLLAMA_HOST = "http://localhost:11434";
@@ -84,7 +87,7 @@ public class LLMUtil {
                     .build();
             
             GenerationParam param = GenerationParam.builder()
-                    .model("qwen-max") // 使用通义千问-Max
+                    .model("qwen3-max") // 使用通义千问-Max
                     .messages(Arrays.asList(userMsg))
                     .resultFormat(GenerationParam.ResultFormat.MESSAGE)
                     .apiKey(AppConfig.getInstance().getAliyunApiKey())
@@ -98,6 +101,61 @@ public class LLMUtil {
             return "";
         }
     }
+    
+    // --- Moonshot (月之暗面, OpenAI-compatible) ---
+    public static String chatWithMoonshot(String prompt) {
+        String apiKey = AppConfig.getInstance().getMoonshotApiKey();
+        if (apiKey == null || apiKey.trim().isEmpty()) {
+            System.err.println("Moonshot API Key is missing!");
+            return "";
+        }
+        try {
+            String thinkingType = AppConfig.getInstance().getMoonshotThinking();
+            if (thinkingType == null || thinkingType.trim().isEmpty()) {
+                thinkingType = "disabled";
+            }
+            java.util.Map<String, Object> message = new java.util.HashMap<>();
+            message.put("role", "user");
+            message.put("content", prompt);
+            
+            java.util.Map<String, Object> payload = new java.util.HashMap<>();
+            payload.put("model", "kimi-k2.5");
+            payload.put("messages", java.util.List.of(message));
+            payload.put("stream", false);
+            java.util.Map<String, Object> thinking = new java.util.HashMap<>();
+            thinking.put("type", thinkingType);
+            payload.put("thinking", thinking);
+            
+            String jsonBody = com.alibaba.fastjson2.JSON.toJSONString(payload);
+            java.net.http.HttpClient client = java.net.http.HttpClient.newHttpClient();
+            java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
+                    .uri(java.net.URI.create("https://api.moonshot.cn/v1/chat/completions"))
+                    .header("Content-Type", "application/json")
+                    .header("Authorization", "Bearer " + apiKey)
+                    .POST(java.net.http.HttpRequest.BodyPublishers.ofString(jsonBody))
+                    .build();
+            java.net.http.HttpResponse<String> response = client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() >= 200 && response.statusCode() < 300) {
+                com.alibaba.fastjson2.JSONObject json = com.alibaba.fastjson2.JSONObject.parseObject(response.body());
+                com.alibaba.fastjson2.JSONArray choices = json.getJSONArray("choices");
+                if (choices != null && !choices.isEmpty()) {
+                    com.alibaba.fastjson2.JSONObject first = choices.getJSONObject(0);
+                    com.alibaba.fastjson2.JSONObject msg = first.getJSONObject("message");
+                    if (msg != null) {
+                        return msg.getString("content");
+                    }
+                }
+                return "";
+            } else {
+                System.err.println("Moonshot Chat Error: HTTP " + response.statusCode() + " - " + response.body());
+                return "";
+            }
+        } catch (Exception e) {
+            System.err.println("Moonshot Chat Error: " + e.getMessage());
+            e.printStackTrace();
+            return "";
+        }
+    }
 
     /**
      * 使用阿里云 Qwen-VL 模型分析图片
@@ -107,30 +165,62 @@ public class LLMUtil {
      * @return 模型回复
      */
     public static String analyzeImageWithAliyun(java.io.File imageFile, String prompt) {
+        if (imageFile == null) return "";
+        return analyzeImageWithAliyun(java.util.Collections.singletonList(imageFile.getAbsolutePath()), prompt);
+    }
+
+    public static String analyzeImageWithAliyun(java.util.List<String> imageSources, String prompt) {
         try {
-            // Upload to OSS first as Aliyun VL models require URL
-            String imageUrl = OSSUtil.uploadFile(imageFile);
-            if (imageUrl == null) {
-                System.err.println("Failed to upload image to OSS for Aliyun analysis.");
+            MultiModalConversation conv = new MultiModalConversation();
+
+            java.util.List<Map<String, Object>> contents = new java.util.ArrayList<>();
+            if (imageSources != null) {
+                for (String src : imageSources) {
+                    if (src == null || src.trim().isEmpty()) continue;
+                    src = src.trim();
+                    String imageUrl = null;
+                    if (src.startsWith("http://") || src.startsWith("https://")) {
+                        imageUrl = src;
+                    } else {
+                        java.io.File f = null;
+                        if (src.startsWith("file:")) {
+                            try {
+                                f = java.nio.file.Paths.get(java.net.URI.create(src)).toFile();
+                            } catch (Exception ignored) {
+                                f = null;
+                            }
+                        }
+                        if (f == null) f = new java.io.File(src);
+                        if (f.exists()) {
+                            imageUrl = OSSUtil.uploadFile(f);
+                        }
+                    }
+                    if (imageUrl == null || imageUrl.trim().isEmpty()) {
+                        System.err.println("Failed to resolve image source for Aliyun analysis: " + src);
+                        continue;
+                    }
+                    contents.add(Collections.singletonMap("image", imageUrl));
+                }
+            }
+            if (contents.isEmpty()) {
+                System.err.println("Failed to resolve any images for Aliyun analysis.");
                 return "Error: Image upload failed.";
             }
 
-            MultiModalConversation conv = new MultiModalConversation();
-            
-            Map<String, Object> imageContent = Collections.singletonMap("image", imageUrl);
             Map<String, Object> textContent = Collections.singletonMap("text", prompt);
-            
+            contents.add(textContent);
+
             MultiModalMessage userMsg = MultiModalMessage.builder()
                     .role(Role.USER.getValue())
-                    .content(Arrays.asList(imageContent, textContent))
+                    .content(contents)
                     .build();
-            
+
             MultiModalConversationParam param = MultiModalConversationParam.builder()
                     .model("qwen3-vl-plus") // 使用 Qwen3-VL-Plus
                     .message(userMsg)
                     .apiKey(AppConfig.getInstance().getAliyunApiKey())
                     .build();
-            
+
             MultiModalConversationResult result = conv.call(param);
             return result.getOutput().getChoices().get(0).getMessage().getContent().get(0).get("text").toString();
         } catch (ApiException | NoApiKeyException | UploadFileException e) {
@@ -643,5 +733,132 @@ public class LLMUtil {
              e.printStackTrace();
              return null;
         }
+    }
+
+    // --- Minimax ---
+
+    public static String chatWithMinimax(String prompt) {
+        String apiKey = AppConfig.getInstance().getMinimaxApiKey();
+        if (apiKey == null || apiKey.trim().isEmpty()) {
+            System.err.println("Minimax API Key is missing!");
+            return "";
+        }
+
+        try {
+            java.util.Map<String, Object> message = new java.util.HashMap<>();
+            message.put("role", "user");
+            message.put("content", prompt);
+
+            java.util.Map<String, Object> payload = new java.util.HashMap<>();
+            payload.put("model", "MiniMax-M2.1");
+            payload.put("messages", java.util.List.of(message));
+            payload.put("stream", false);
+
+            java.util.Map<String, Object> extraBody = new java.util.HashMap<>();
+            extraBody.put("reasoning_split", Boolean.TRUE);
+            payload.put("extra_body", extraBody);
+
+            String jsonBody = com.alibaba.fastjson2.JSON.toJSONString(payload);
+
+            java.net.http.HttpClient client = java.net.http.HttpClient.newHttpClient();
+            java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
+                    .uri(java.net.URI.create("https://api.minimaxi.com/v1/chat/completions"))
+                    .header("Content-Type", "application/json")
+                    .header("Authorization", "Bearer " + apiKey)
+                    .POST(java.net.http.HttpRequest.BodyPublishers.ofString(jsonBody))
+                    .build();
+
+            java.net.http.HttpResponse<String> response = client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+
+            if (response.statusCode() == 200) {
+                com.alibaba.fastjson2.JSONObject jsonResponse = com.alibaba.fastjson2.JSON.parseObject(response.body());
+                if (jsonResponse.containsKey("choices")) {
+                    String content = jsonResponse.getJSONArray("choices")
+                            .getJSONObject(0)
+                            .getJSONObject("message")
+                            .getString("content");
+                    if (content != null) {
+                        content = content.replaceAll("(?s)<think>.*?</think>", "").trim();
+                    }
+                    return content;
+                }
+            } else {
+                System.err.println("Minimax API Error: " + response.statusCode() + " - " + response.body());
+            }
+        } catch (Exception e) {
+            System.err.println("Minimax Chat Exception: " + e.getMessage());
+            e.printStackTrace();
+        }
+        return "";
+    }
+
+    // --- Zhipu GLM ---
+
+    public static String chatWithGLM(String prompt) {
+        String apiKey = AppConfig.getInstance().getGlmApiKey();
+        if (apiKey == null || apiKey.trim().isEmpty()) {
+            System.err.println("GLM API Key is missing!");
+            return "";
+        }
+
+        try {
+            String thinkingRaw = AppConfig.getInstance().getGlmThinking();
+            String thinkingNorm = thinkingRaw == null ? "" : thinkingRaw.trim().toLowerCase();
+            String thinkingType;
+            if (thinkingNorm.isEmpty()) {
+                thinkingType = "disabled";
+            } else if ("enabled".equals(thinkingNorm) || "enable".equals(thinkingNorm) || "true".equals(thinkingNorm) || "1".equals(thinkingNorm) || "on".equals(thinkingNorm)) {
+                thinkingType = "enabled";
+            } else if ("disabled".equals(thinkingNorm) || "disable".equals(thinkingNorm) || "false".equals(thinkingNorm) || "0".equals(thinkingNorm) || "off".equals(thinkingNorm)) {
+                thinkingType = "disabled";
+            } else {
+                thinkingType = "disabled";
+            }
+            java.util.Map<String, Object> message = new java.util.HashMap<>();
+            message.put("role", "user");
+            message.put("content", prompt);
+
+            java.util.Map<String, Object> payload = new java.util.HashMap<>();
+            payload.put("model", "glm-4.6");
+            payload.put("messages", java.util.List.of(message));
+            payload.put("stream", false);
+            java.util.Map<String, Object> thinking = new java.util.HashMap<>();
+            thinking.put("type", thinkingType);
+            payload.put("thinking", thinking);
+
+            String jsonBody = com.alibaba.fastjson2.JSON.toJSONString(payload);
+
+            java.net.http.HttpClient client = java.net.http.HttpClient.newHttpClient();
+            java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
+                    .uri(java.net.URI.create("https://open.bigmodel.cn/api/paas/v4/chat/completions"))
+                    .header("Content-Type", "application/json")
+                    .header("Authorization", "Bearer " + apiKey)
+                    .POST(java.net.http.HttpRequest.BodyPublishers.ofString(jsonBody))
+                    .build();
+
+            java.net.http.HttpResponse<String> response = client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+
+            if (response.statusCode() >= 200 && response.statusCode() < 300) {
+                com.alibaba.fastjson2.JSONObject jsonResponse = com.alibaba.fastjson2.JSON.parseObject(response.body());
+                if (jsonResponse.containsKey("choices")) {
+                    com.alibaba.fastjson2.JSONArray choices = jsonResponse.getJSONArray("choices");
+                    if (choices != null && !choices.isEmpty()) {
+                        String content = choices.getJSONObject(0)
+                                .getJSONObject("message")
+                                .getString("content");
+                        if (content != null) {
+                            content = content.replaceAll("(?s)<think>.*?</think>", "").trim();
+                        }
+                        return content;
+                    }
+                }
+            } else {
+                System.err.println("GLM API Error: " + response.statusCode() + " - " + response.body());
+            }
+        } catch (Exception e) {
+            System.err.println("GLM Chat Exception: " + e.getMessage());
+            e.printStackTrace();
+        }
+        return "";
     }
 }

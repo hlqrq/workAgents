@@ -11,6 +11,11 @@ public class AppConfig {
     // Configuration Keys
     public static final String KEY_GEMINI_API_KEY = "GEMINI_API_KEY";
     public static final String KEY_DEEPSEEK_API_KEY = "deepseek.api-key";
+    public static final String KEY_MINIMAX_API_KEY = "minimax.api-key";
+    public static final String KEY_MOONSHOT_API_KEY = "moonshot.api-key";
+    public static final String KEY_MOONSHOT_THINKING = "moonshot.thinking";
+    public static final String KEY_GLM_API_KEY = "glm.api-key";
+    public static final String KEY_GLM_THINKING = "glm.thinking";
     public static final String KEY_ALIYUN_API_KEY = "aliyun.api-key";
     public static final String KEY_ALIYUN_OSS_ENDPOINT = "aliyun.oss.endpoint";
     public static final String KEY_ALIYUN_OSS_ACCESS_KEY_ID = "aliyun.oss.access-key-id";
@@ -28,11 +33,17 @@ public class AppConfig {
     public static final String KEY_ADMIN_USERS = "podcast.admin.users";
     public static final String KEY_DINGTALK_AGENT_ID = "dingtalk.agent.id";
     public static final String KEY_CHROME_DEBUG_PORT = "chrome.debug.port";
+    public static final String KEY_AUTOWEB_VISUAL_PROMPT = "autoweb.visual.prompt";
+    public static final String KEY_AUTOWEB_WAIT_FOR_LOAD_STATE_TIMEOUT_MS = "autoweb.waitForLoadState.timeout.ms";
+    public static final String KEY_AUTOWEB_DEBUG_FRAME_CAPTURE = "autoweb.debug.frame.capture";
 
     // Default Values
     public static final String DEFAULT_DOWNLOAD_DIR = "/tmp/podCastItems/";
     public static final int DEFAULT_CHROME_DEBUG_PORT = 9222;
     public static final int DEFAULT_PUBLISH_BATCH_SIZE = 1;
+    public static final String DEFAULT_AUTOWEB_VISUAL_PROMPT = "请你提取一下图片里面的页面布局和元素信息，方便大模型理解这个界面的结构和元素，保障对于筛选项和操作按钮的准确和完整，不用给建议，只需要称述实际存在的元素内容，在保障完整性的同时，尽量减少字符数";
+    public static final int DEFAULT_AUTOWEB_WAIT_FOR_LOAD_STATE_TIMEOUT_MS = 20000;
+    public static final boolean DEFAULT_AUTOWEB_DEBUG_FRAME_CAPTURE = false;
 
     private AppConfig() {
         loadProperties();
@@ -71,12 +82,56 @@ public class AppConfig {
         return getProperty(KEY_DEEPSEEK_API_KEY);
     }
 
+    public String getMinimaxApiKey() {
+        return getProperty(KEY_MINIMAX_API_KEY);
+    }
+    
+    public String getMoonshotApiKey() {
+        return getProperty(KEY_MOONSHOT_API_KEY);
+    }
+    
+    public String getMoonshotThinking() {
+        return getProperty(KEY_MOONSHOT_THINKING);
+    }
+
+    public String getGlmApiKey() {
+        return getProperty(KEY_GLM_API_KEY);
+    }
+    
+    public String getGlmThinking() {
+        return getProperty(KEY_GLM_THINKING);
+    }
+
     public String getAliyunApiKey() {
         return getProperty(KEY_ALIYUN_API_KEY);
     }
 
     public String getAliyunOssEndpoint() {
         return getProperty(KEY_ALIYUN_OSS_ENDPOINT);
+    }
+
+    public String getAutowebVisualPrompt() {
+        return getProperty(KEY_AUTOWEB_VISUAL_PROMPT, DEFAULT_AUTOWEB_VISUAL_PROMPT);
+    }
+
+    public int getAutowebWaitForLoadStateTimeoutMs() {
+        String v = getProperty(KEY_AUTOWEB_WAIT_FOR_LOAD_STATE_TIMEOUT_MS);
+        if (v != null && !v.isEmpty()) {
+            try {
+                return Integer.parseInt(v);
+            } catch (NumberFormatException e) {
+                System.err.println("Invalid autoweb waitForLoadState timeout format, using default: " + DEFAULT_AUTOWEB_WAIT_FOR_LOAD_STATE_TIMEOUT_MS);
+            }
+        }
+        return DEFAULT_AUTOWEB_WAIT_FOR_LOAD_STATE_TIMEOUT_MS;
+    }
+
+    public boolean isAutowebDebugFrameCaptureEnabled() {
+        String v = getProperty(KEY_AUTOWEB_DEBUG_FRAME_CAPTURE);
+        if (v != null && !v.isEmpty()) {
+            return Boolean.parseBoolean(v);
+        }
+        return DEFAULT_AUTOWEB_DEBUG_FRAME_CAPTURE;
     }
 
     public String getAliyunOssAccessKeyId() {

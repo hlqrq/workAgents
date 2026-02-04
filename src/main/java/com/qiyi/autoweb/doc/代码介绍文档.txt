@@ -1,0 +1,206 @@
+AutoWeb 代码介绍文档（autoweb 包）
+
+本文包含：
+1) 核心类/核心方法介绍
+2) AutoWebAgent 的功能介绍 + 自动化网页流程介绍（含核心对象定义）
+3) autoweb/cache、autoweb/debug、autoweb/skills 三个目录的文件与内容说明
+
+---
+## 0. 总体流程（从入口到执行）
+
+- 入口在 AutoWebAgent.main/run：连接浏览器（Playwright）→ 绑定/选择当前 Page/Frame → 启动 Swing 控制台 AutoWebAgentUI.createGUI。
+- UI 上四个关键动作（“生成计划 / 生成代码 / 修正代码 / 执行代码”）共同复用一条主链路：
+  payload 组装（PayloadSupport）→ 模型调用与代码归一化（GroovySupport）→（代码阶段）静态检查（GroovyLinter）→ 执行（GroovySupport.executeWithGroovy + WebDSL）。
+- 页面采集发生在 AutoWebAgent.prepareStepHtmls：
+  按计划 step 采集 RAW_HTML 或 ARIA_SNAPSHOT → 清洗/截断 → 写入缓存（HtmlSnapshotDao / autoweb/cache）。
+
+---
+## 1. 核心类与核心方法
+
+### 1.1 AutoWebAgent（入口 + 编排 Facade）
+核心职责：
+- 连接浏览器、定位/附着到用户当前页面（或新建页面导航）。
+- 提供 UI 所需的一组“门面式静态方法”，把：计划解析、页面采集、payload 生成、执行入口导航、执行上下文选择、Groovy 执行等能力集中暴露。
+
+关键方法（按阶段）：
+- 启动/上下文：
+  - main(...)：启动时清理 debug/cache，加载 skills prompt。
+  - run(url, userPrompt)：连接浏览器并启动 UI。
+  - waitAndFindContext / reloadAndFindContext：选择最佳执行上下文（Page/Frame）。
+- 计划：
+  - parsePlanFromText(text)：解析模型输出为 PlanParseResult（内部委托 PlanRoutingSupport）。
+- 采集：
+  - prepareStepHtmls(rootPage, steps, ..., captureMode, a11yInterestingOnly)：按计划采集每个 step 的页面内容并缓存。
+- 执行：
+  - ensureRootPageAtUrl(rootPage, targetUrl)：执行前必要时导航到入口 URL（忽略 query）。
+  - chooseExecutionEntryUrl(session, prompt)：推断执行入口（内部委托 PlanRoutingSupport）。
+
+### 1.2 AutoWebAgentUI（Swing 控制台 + 多模型会话调度）
+核心职责：
+- 提供计划/代码生成、修正、执行的可视化按钮与日志面板。
+- 管理每个模型一个会话状态（ModelSession），支持并发生成、统一展示与切换。
+
+关键点：
+- 并发模型：后台线程并发请求多个模型；用 uiEpoch 避免“过期任务”回写 UI。
+- Playwright 串行：所有浏览器操作使用 PLAYWRIGHT_LOCK 串行化，避免跨线程并发操作不稳定。
+
+### 1.3 PayloadSupport（payload 组装器）
+核心职责：
+- 把“任务 + 计划 + 页面快照”组织成模型可读的文本协议（MODE 驱动）。
+
+关键方法：
+- buildPlanOnlyPayload / buildPlanEntryPayload：生成 PLAN 阶段 payload。
+- buildPlanRefinePayload：在入口不明确时补充 URL 映射与用户输入，重新规划。
+- buildCodegenPayload：拼接 PLAN + STEP_HTMLS_CLEANED，进入 CODEGEN。
+- buildRefinePayload：拼接 CURRENT_PAGE_HTML_CLEANED + PLAN + STEP_HTMLS_CLEANED，用于 REFINE_CODE。
+
+### 1.4 GroovySupport（模型调用 + 代码归一化 + 执行）
+核心职责：
+- 从 autoweb/skills 加载 prompt 模板，按 MODE 裁剪/拼装 prompt。
+- 统一路由不同模型的调用，并保存调试产物（payload/prompt/response）。
+- 执行 Groovy：绑定 page/web/out，让脚本以 WebDSL 为主要操作接口。
+
+关键方法：
+- loadPrompts：加载技能模板（支持热更新）。
+- generateGroovyScript / generateRefinedGroovyScript：模型生成/修正代码。
+- normalizeGeneratedGroovy：清理模型输出结构、做常见模式归一化。
+- executeWithGroovy：GroovyLinter 静态检查 → Binding 注入 → GroovyShell.evaluate。
+
+### 1.5 WebDSL（给 Groovy/LLM 的高层自动化 DSL）
+核心职责：
+- 封装 Playwright 常用操作并提供大量兜底策略：更稳的定位、更少的脚本幻觉、更明确的日志。
+
+关键方法（最常用）：
+- 导航/等待：open/navigate、waitForLoadState、waitForUrl、waitForNewPage、waitForNavigation。
+- 基础交互：click、type、check/uncheck、selectDropdown、getText/getAllText。
+- 语义点击：clickButton、clickTab（按文本优先，兼容 selector）。
+
+### 1.6 PlanRoutingSupport（计划解析 + 上下文路由 + 执行前导航）
+核心职责：
+- URL 规整与抽取（忽略 query 的同页判断）。
+- 计划解析（parsePlanFromText）与 confirmed 判定。
+- 执行前导航（ensureRootPageAtUrl + waitForUrlPrefix）。
+- 上下文扫描（scanContexts）与最佳 Frame 选择。
+
+### 1.7 HTMLCleaner（RAW_HTML 清洗）
+核心职责：
+- 用 jsoup 移除脚本/样式等噪声，保留定位关键属性，截断长文本并压缩空白。
+
+### 1.8 HtmlSnapshotDao（采集缓存持久化）
+核心职责：
+- 按 url + entryAction + captureMode(+a11yInterestingOnly) 生成 cacheKey。
+- 读写 autoweb/cache 下的 raw/cleaned 快照文件，并兼容历史 key。
+
+### 1.9 StorageSupport（调试落盘 + 脱敏 + 统计）
+核心职责：
+- 统一调试文件落盘到 autoweb/debug（自动脱敏、截断、命名规范）。
+- 输出 payload/prompt 的字节统计与 payload 结构摘要。
+- 安全读取 page.url（锁保护）。
+
+### 1.10 GroovyLinter（执行前静态检查）
+核心职责：
+- 拦截危险模式（System.exit/exec/while(true) 等）。
+- GroovyShell.parse 做语法级检查，避免执行阶段才报错。
+
+### 1.11 AutoWebAgentUtils（目录清理 + 调试辅助 + 超时封装）
+核心职责：
+- 启动时清理 autoweb/debug 与 autoweb/cache。
+- 保存 debug_code 变体文件，便于多模型对比与回溯。
+- 对部分模型调用增加超时保护（避免 UI 卡死）。
+
+### 1.12 MultiModelAutoRun（多模型 E2E 回归 Runner）
+核心职责：
+- 用同一批 Case 在多个模型上跑 Plan/Code/执行，对比成功率/耗时/日志，并生成报告到 autoweb/debug。
+
+---
+## 2. AutoWebAgent 功能介绍与自动化网页流程（含核心对象定义）
+
+### 2.1 AutoWebAgent 的定位
+- “编排器 + 门面”：把浏览器连接、页面采集、payload 拼装、模型调用、代码检查、脚本执行串成一条可复用链路。
+- UI 只做交互与状态展示；核心业务能力集中在 AutoWebAgent（静态方法）与几个 support 类中。
+
+### 2.2 核心对象定义（理解流程必备）
+- HtmlCaptureMode：页面采集模式
+  - RAW_HTML：直接抓取 DOM HTML，信息密度高。
+  - ARIA_SNAPSHOT：可访问性语义快照，适合复杂结构/iframe/虚拟列表。
+- PlanStep：单步计划结构（index/description/targetUrl/entryAction/status）。
+- PlanParseResult：计划解析结果（planText/steps/confirmed/hasQuestion）。
+- HtmlSnapshot：一步采集的页面快照（stepIndex/url/entryAction/cacheKey/cleanedHtml）。
+- ContextWrapper：执行上下文包装（Page 或 Frame，用于采集/执行时选择内容区）。
+- ModelSession：UI 中的单模型会话状态（计划、步骤、采集结果、采集参数、阶段标记等）。
+
+### 2.3 自动化流程（从“任务输入”到“脚本执行”）
+1) 启动与附着页面
+   - AutoWebAgent.run：连接浏览器 → 找到合适的 Page（或新建页导航）→ 启动 AutoWebAgentUI。
+2) 生成计划（PLAN_*）
+   - PayloadSupport.buildPlanOnlyPayload / buildPlanEntryPayload：
+     生成 MODE=PLAN_ONLY/PLAN_ENTRY 的 payload（包含 CURRENT_PAGE_URL、用户提供 URL/映射等）。
+   - GroovySupport.generateGroovyScript：用 skills 模板拼 prompt 并调用模型。
+   - PlanRoutingSupport.parsePlanFromText：解析 Step 列表并判断 confirmed。
+3) 采集页面（为生成代码做准备）
+   - AutoWebAgent.prepareStepHtmls：
+     对每个 step 的 targetUrl/entryAction 做“是否当前页/是否需要导航/是否可复用”判断；
+     优先命中 HtmlSnapshotDao 缓存，未命中则采集并清洗，然后落盘写入 autoweb/cache。
+4) 生成代码（CODEGEN）
+   - PayloadSupport.buildCodegenPayload：
+     拼接 PLAN + STEP_HTMLS_CLEANED（可能包含 DUPLICATE_URL: SAME_AS_STEP x）。
+   - GroovySupport.generateGroovyScript：请求模型生成 Groovy。
+   - GroovyLinter.check：执行前安全/语法检查，避免危险脚本直接运行。
+5) 修正代码（REFINE_CODE，可选）
+   - 重新采集当前页 freshHtml/cleanedHtml（更贴近失败现场）。
+   - PayloadSupport.buildRefinePayload：携带当前页 + 计划 + step 快照 + 修正提示。
+   - GroovySupport.generateRefinedGroovyScript：让模型输出修正版脚本，再走 lint。
+6) 执行代码（Groovy + WebDSL）
+   - PlanRoutingSupport.ensureRootPageAtUrl：必要时导航回入口，避免“跑偏页面”执行。
+   - PlanRoutingSupport.waitAndFindContext / reloadAndFindContext：重新选择最佳 Page/Frame 上下文。
+   - GroovySupport.executeWithGroovy：绑定 page/web/out 并执行脚本；脚本通过 WebDSL 完成点击/输入/抽取等操作。
+
+---
+## 3. autoweb/cache、autoweb/debug、autoweb/skills 目录内容说明
+
+说明：这三个目录位于项目根目录下的 autoweb/。其中 cache/debug 多为运行时生成；skills 是版本库内的 prompt 模板文件。
+
+### 3.1 autoweb/cache（页面采集缓存）
+用途：
+- 缓存每个 step 的页面快照（raw + cleaned），避免重复采集、减少模型输入 token。
+
+典型文件：
+- <cacheKey>.raw.html
+  - 原始采集结果（RAW_HTML 时为 DOM HTML；ARIA_SNAPSHOT 时为 JSON 文本）。
+- <cacheKey>.cleaned.html
+  - 清洗/压缩后的内容（用于拼接到 payload 的 STEP_HTMLS_CLEANED）。
+
+补充：视觉缓存（来自 UI 的“视觉补充”逻辑）
+- visual_desc_<hash>.txt
+  - 针对某个 baseUrlKey 的“页面视觉描述”文本缓存（用于 REFINE/CODEGEN 的 VISUAL_DESCRIPTION）。
+- visual_<hash>_<n>.png（n=1..5）
+  - 该页面的截图缓存，用于图片理解/离线分析等辅助能力。
+
+### 3.2 autoweb/debug（调试产物与回溯材料）
+用途：
+- 保存每次请求/执行的关键中间产物，便于复盘、对齐不同模型的差异与失败点定位。
+
+典型文件（StorageSupport.saveDebugArtifact 产出）：
+- <ts>_<model>_<mode>_<kind>.txt
+  - ts：时间戳（yyyyMMdd_HHmmss_SSS）
+  - model：模型标识（如 DEEPSEEK/QWEN_MAX/OLLAMA_QWEN3_8B）
+  - mode：PLAN_ONLY/PLAN_REFINE/CODEGEN/REFINE_CODE 等
+  - kind：payload/prompt/response/exception/report/...（由调用点决定）
+
+典型文件（固定命名/便捷调试）：
+- debug_raw.html / debug_cleaned.html
+  - 快速查看一次采集的原始/清洗后页面内容（AutoWebAgentUtils.saveDebugArtifacts）。
+- debug_code.groovy
+  - 快速查看一次生成的 Groovy 代码。
+- debug_code_<model>_<tag>_<ts>.groovy
+  - 保存某模型某阶段（tag=gen/refine/plan_refine 等）的代码变体，便于多次迭代对比。
+
+### 3.3 autoweb/skills（提示词模板）
+用途：
+- 存放 Groovy 生成/修正的 prompt 模板，支持运行时热更新（GroovySupport.loadPrompts 会检测文件变化）。
+
+当前文件：
+- groovy_script_prompt.txt
+  - 用于 PLAN/CODEGEN 等阶段的主模板（包含用户任务与 payload 占位）。
+- refined_groovy_script_prompt.txt
+  - 用于 REFINE_CODE 的修正模板（更强调“基于错误/现状修正”）。
