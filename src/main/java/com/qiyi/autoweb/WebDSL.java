@@ -496,6 +496,10 @@ public class WebDSL {
         return v.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 
+    /**
+     * 导航到指定 URL。
+     * 支持对模型输出常见的多余引号/反引号做容错清理。
+     */
     public void navigate(String url) {
         String u = url == null ? "" : url.trim();
         u = u.replace("`", "").trim();
@@ -507,25 +511,38 @@ public class WebDSL {
     }
 
     /**
-     * Alias for navigate.
+     * navigate 的别名，便于脚本使用更自然的 open(url) 语义。
      */
     public void open(String url) {
         navigate(url);
     }
 
+    /**
+     * 返回当前页面 URL。
+     */
     public String getCurrentUrl() {
         return page.url();
     }
 
+    /**
+     * 返回当前页面标题。
+     */
     public String getTitle() {
         return page.title();
     }
 
+    /**
+     * 等待 URL 满足给定正则（Playwright waitForURL）。
+     */
     public void waitForUrl(String urlRegex) {
         log("Wait: For URL matching '" + urlRegex + "'");
         page.waitForURL(urlRegex, new Page.WaitForURLOptions().setTimeout(defaultTimeout));
     }
     
+    /**
+     * 等待页面进入稳定加载状态。
+     * 优先等待 NETWORKIDLE，失败时降级到 LOAD。
+     */
     public void waitForLoadState() {
         log("Wait: For load state (networkidle)");
         try {
@@ -536,8 +553,8 @@ public class WebDSL {
     }
 
     /**
-     * Executes an action that triggers a new page (tab/window), waits for it, 
-     * and returns a new WebDSL instance for that page.
+     * 执行一个会触发“新页面/新标签页”的动作，并等待新页面可用。
+     * 返回绑定到新页面的 WebDSL 实例，便于后续继续用 DSL 操作。
      */
     public WebDSL waitForNewPage(Runnable triggerAction) {
         log("Action: Waiting for new page...");
@@ -559,7 +576,7 @@ public class WebDSL {
     }
 
     /**
-     * Executes an action that triggers navigation in the CURRENT page.
+     * 执行一个会触发“当前页面导航”的动作，并等待导航完成。
      */
     public void waitForNavigation(Runnable triggerAction) {
         log("Action: Waiting for navigation...");
@@ -1155,6 +1172,13 @@ public class WebDSL {
 
     // --- Basic Interaction ---
 
+    /**
+     * 点击元素。
+     *
+     * 设计目标：尽量容忍模型生成的不稳定 selector。
+     * - 优先按 selector 定位；必要时尝试按文本/checkbox 意图做兜底；
+     * - 不可见时会尝试滚动到可见；仍不可见时会尝试 DOM 侧 click 兜底。
+     */
     public void click(String selector) {
         log("Action: Click '" + selector + "'");
         try {
@@ -1205,6 +1229,9 @@ public class WebDSL {
         }, "click " + selector);
     }
     
+    /**
+     * 点击指定 selector 的第 N 个匹配项。
+     */
     public void click(String selector, int index) {
         log("Action: Click '" + selector + "' at index " + index);
         retry(() -> {
@@ -1219,6 +1246,13 @@ public class WebDSL {
         }, "click " + selector + " at " + index);
     }
 
+    /**
+     * 在输入控件中填入文本（优先 fill）。
+     *
+     * 兜底策略：
+     * - 如果 selector 形如 [aria-label="..."]，会尝试通过 getByLabel/getByPlaceholder 找到真实输入框；
+     * - 如果目标是下拉框，会尝试切换到 selectDropdown 路径。
+     */
     public void type(String selector, String text) {
         log("Action: Type '" + text + "' into '" + selector + "'");
         retry(() -> {
@@ -1336,7 +1370,7 @@ public class WebDSL {
     }
     
     /**
-     * Selects an option from a <select> element by value or label.
+     * 选择原生 <select> 的选项（按 value 优先，失败则按 label）。
      */
     public void selectOption(String selector, String valueOrLabel) {
         log("Action: Select option '" + valueOrLabel + "' in '" + selector + "'");
@@ -1351,10 +1385,21 @@ public class WebDSL {
         }
     }
     
+    /**
+     * 选择下拉框选项（常见 Ant Design / Element UI 等）。
+     * 推荐用于替代直接 click listbox 选项的写法，提高稳定性。
+     */
     public void selectDropdown(String dropdownNameOrSelector, String optionText) {
         selectDropdown(dropdownNameOrSelector, optionText, 3);
     }
     
+    /**
+     * 选择下拉框选项，并允许在弹层中做滚动查找。
+     *
+     * @param dropdownNameOrSelector 下拉触发器的控件名或 selector
+     * @param optionText 目标选项文本
+     * @param maxScrolls 允许滚动次数（用于虚拟列表/长列表）
+     */
     public void selectDropdown(String dropdownNameOrSelector, String optionText, int maxScrolls) {
         String dd = dropdownNameOrSelector == null ? "" : dropdownNameOrSelector.trim();
         String opt = optionText == null ? "" : optionText.trim();
@@ -1404,6 +1449,10 @@ public class WebDSL {
         }, "selectDropdown " + dd + " -> " + opt);
     }
 
+    /**
+     * 获取元素文本（innerText）。
+     * 会先等待元素出现，便于直接用在“表格/列表抽取”的脚本里。
+     */
     public String getText(String selector) {
         return retrySupply(() -> {
             waitFor(selector);
@@ -2663,7 +2712,11 @@ public class WebDSL {
     }
     
     /**
-     * Tries to find a button by text or selector and click it.
+     * 点击按钮（按文本优先，必要时按 selector）。
+     *
+     * 适用场景：模型输出“点击 搜索/确定/提交”等语义化描述时，避免直接拼脆弱的 CSS/XPath。
+     * - 输入可以是纯文本（会组合 role=button、button:has-text、text 等多种策略）
+     * - 也可以是 selector（role=/css=/xpath=/text=...）
      */
     public void clickButton(String textOrSelector) {
         String raw = textOrSelector == null ? "" : textOrSelector.trim();
@@ -2716,6 +2769,10 @@ public class WebDSL {
         throw new RuntimeException("Button not found/clickable: " + raw);
     }
 
+    /**
+     * 点击 Tab（按文本优先，必要时按 selector）。
+     * 优先走 role=tab 的语义定位，并兼容常见组件库的 tab DOM 结构。
+     */
     public void clickTab(String textOrSelector) {
         String raw = textOrSelector == null ? "" : textOrSelector.trim();
         if (raw.isEmpty()) throw new RuntimeException("clickTab: empty input");

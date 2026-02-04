@@ -15,8 +15,19 @@ import com.qiyi.util.PlayWrightUtil;
 import javax.swing.SwingUtilities;
 
 /**
- * AutoWeb 主入口与编排器
- * 负责连接浏览器、采集页面、调用模型并执行 Groovy 脚本
+ * AutoWeb 的主入口与编排器。
+ *
+ * 角色定位：
+ * - “门面（Facade）+ 编排（Orchestration）”：把浏览器连接、页面采集、payload 组装、LLM 调用、
+ *   Groovy 静态检查、脚本执行串成一条可复用链路；
+ * - 供 {@link AutoWebAgentUI} 使用：UI 只负责交互与状态展示，核心业务逻辑集中在此类的静态方法中；
+ * - 供回归框架使用：例如 {@link MultiModelAutoRun} 复用本类完成多模型对比执行。
+ *
+ * 典型链路：
+ * 1) 生成计划（PLAN_*）：{@link PayloadSupport} → {@link GroovySupport#generateGroovyScript} → {@link #parsePlanFromText}
+ * 2) 生成代码（CODEGEN）：{@link #prepareStepHtmls} → {@link PayloadSupport} → {@link GroovySupport#generateGroovyScript} → {@link GroovyLinter}
+ * 3) 修正代码（REFINE_CODE）：freshHtml/clean → {@link PayloadSupport} → {@link GroovySupport#generateRefinedGroovyScript}
+ * 4) 执行：确保入口 URL → 选择最佳上下文（Frame/Page）→ GroovyShell 绑定 {@link WebDSL} 执行
  */
 public class AutoWebAgent {
     static String ACTIVE_MODEL = "DEEPSEEK";
@@ -77,7 +88,10 @@ public class AutoWebAgent {
     }
 
     /**
-     * 页面采集模式：原始 HTML 或 ARIA 快照
+     * 页面采集模式。
+     *
+     * - RAW_HTML：直接取 DOM HTML，适合结构化节点与属性较完整的页面；
+     * - ARIA_SNAPSHOT：走可访问性语义快照，适合 iframe/虚拟列表/结构复杂但语义稳定的页面。
      */
     enum HtmlCaptureMode {
         RAW_HTML,
@@ -85,7 +99,11 @@ public class AutoWebAgent {
     }
 
     /**
-     * CLI 入口，解析参数并启动 UI
+     * CLI 入口，解析参数并启动 UI。
+     *
+     * 约定：
+     * - 会在启动时清理 autoweb/debug 与 autoweb/cache，避免调试文件与缓存污染当前运行；
+     * - 会从 autoweb/skills 加载 prompt 模板（可热更新）。
      */
     public static void main(String[] args) {
         AutoWebAgentUtils.cleanDebugDirectory();
@@ -125,7 +143,10 @@ public class AutoWebAgent {
     }
 
     /**
-     * 连接浏览器并启动控制台 UI
+     * 连接浏览器并启动控制台 UI。
+     *
+     * @param url 初始入口 URL（可为空；为空时会尽量附着到现有激活页面）
+     * @param userPrompt 用户任务描述（自然语言）
      */
     public static void run(String url, String userPrompt) {
         GroovySupport.loadPrompts();
@@ -288,9 +309,12 @@ public class AutoWebAgent {
         }
     }
     
-    // A simple wrapper to hold the current execution context (Page or Frame)
     /**
-     * 执行上下文包装：Page 或 Frame
+     * 执行上下文包装：承载当前用于采集/执行的 Playwright 上下文。
+     *
+     * 约定：
+     * - context 可能是 {@link Page} 或 {@link Frame}；
+     * - name 用于 UI 展示与日志标识（例如 “Main Page” 或 “Frame: xxx”）。
      */
     static class ContextWrapper {
         Object context;
@@ -302,7 +326,8 @@ public class AutoWebAgent {
     }
 
     /**
-     * 上下文扫描结果
+     * 上下文扫描结果。
+     * wrappers 为候选上下文列表；best 为当前最推荐的上下文（通常是内容区 iframe）。
      */
     static class ScanResult {
         java.util.List<ContextWrapper> wrappers = new java.util.ArrayList<>();
@@ -310,7 +335,14 @@ public class AutoWebAgent {
     }
 
     /**
-     * 计划步骤结构
+     * 计划步骤结构（Plan Step）。
+     *
+     * 字段含义：
+     * - index：从 1 开始的步骤序号；
+     * - description：该步的自然语言描述；
+     * - targetUrl：目标页面（可为 CURRENT_PAGE 或空，表示复用当前页面）；
+     * - entryAction：当需要进入目标页面/区域时的入口动作提示（例如点击某菜单/按钮）；
+     * - status：CONFIRMED/UNKNOWN 等，用于判断计划是否可执行。
      */
     static class PlanStep {
         int index;
@@ -321,7 +353,9 @@ public class AutoWebAgent {
     }
 
     /**
-     * 计划解析结果
+     * 计划解析结果。
+     * planText 为原始计划文本（可能已截取 PLAN_START~PLAN_END）；steps 为解析出的步骤列表；
+     * confirmed/hasQuestion 用于驱动 UI 是否需要补充入口地址或重新规划。
      */
     static class PlanParseResult {
         String planText;
@@ -331,7 +365,8 @@ public class AutoWebAgent {
     }
 
     /**
-     * 步骤 HTML 快照结构
+     * 步骤 HTML 快照结构。
+     * 采集与清洗后的页面内容会写入 autoweb/cache，并在生成 CODEGEN/REFINE_CODE payload 时复用。
      */
     static class HtmlSnapshot {
         int stepIndex;
@@ -342,7 +377,8 @@ public class AutoWebAgent {
     }
 
     /**
-     * 单模型会话状态
+     * 单模型会话状态（UI 侧每个模型一个会话）。
+     * 该对象在 {@link AutoWebAgentUI} 中承载计划/步骤、采集结果与执行阶段的状态切换。
      */
     static class ModelSession {
         String userPrompt;

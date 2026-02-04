@@ -4,8 +4,16 @@ import com.microsoft.playwright.Page;
 import com.qiyi.config.AppConfig;
 
 /**
- * 计划解析与页面上下文路由工具
- * 提供 URL 解析、入口选择、上下文扫描与执行前导航能力
+ * 计划解析与页面上下文路由工具。
+ *
+ * 主要职责：
+ * - URL 工具：抽取/规整 URL、忽略 query 的同页判断；
+ * - 计划解析：把模型输出解析为 Step 列表，并判断计划是否“已确认可执行”（confirmed）；
+ * - 上下文选择：在 Page 与多个 iframe 中按可见面积/URL 等信号选择“内容区”上下文；
+ * - 执行前导航：必要时将 rootPage 导航到入口 URL，并等待页面稳定（兼容登录等待场景）。
+ *
+ * 说明：该类偏“启发式（heuristic）”，用于提高实际网页自动化的成功率与容错性，
+ * 因此会存在多处降级与回退策略。
  */
 class PlanRoutingSupport {
     /**

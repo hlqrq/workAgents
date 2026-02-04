@@ -466,7 +466,16 @@ class GroovySupport {
     }
 
     /**
-     * 进行静态检查并执行 Groovy 脚本，注入 page/web/out
+     * 进行静态检查并执行 Groovy 脚本。
+     *
+     * 注入变量：
+     * - page：当前执行上下文（Page 或 Frame）
+     * - web：{@link WebDSL}，脚本应优先使用该 DSL 完成网页自动化
+     * - out：PrintWriter，支持 println 输出（按行回调到 logger）
+     *
+     * 执行前：
+     * - 通过 {@link GroovyLinter} 执行安全/语法检查；
+     * - 若存在安全或语法级错误，直接中止执行，避免对本机产生副作用。
      */
     static void executeWithGroovy(String scriptCode, Object pageOrFrame, java.util.function.Consumer<String> logger) throws Exception {
         if (Thread.currentThread().isInterrupted()) {
@@ -488,12 +497,14 @@ class GroovySupport {
         }
 
         try {
+            // 核心逻辑：通过 Binding 注入运行时对象，让脚本只关注业务步骤而非 Playwright 细节
             groovy.lang.Binding binding = new groovy.lang.Binding();
             binding.setVariable("page", pageOrFrame);
 
             WebDSL dsl = new WebDSL(pageOrFrame, logger);
             binding.setVariable("web", dsl);
 
+            // 核心逻辑：把 Groovy 的 println/print 输出按行转发到 logger，便于 UI 统一展示
             binding.setVariable("out", new java.io.PrintWriter(new java.io.Writer() {
                 private StringBuilder buffer = new StringBuilder();
                 @Override
@@ -530,7 +541,8 @@ class GroovySupport {
     }
 
     /**
-     * 按模型名称路由到对应 LLM 实现
+     * 按模型名称路由到对应 LLM 实现。
+     * 核心逻辑：统一清理 code fence，并对部分模型增加超时保护，避免 UI 长时间阻塞。
      */
     private static String callModel(String modelName, String prompt, java.util.function.Consumer<String> uiLogger) {
         String modelKey = getModelKey(modelName);
@@ -541,6 +553,7 @@ class GroovySupport {
         try {
             switch (modelKey) {
                 case "MINIMAX":
+                    // 核心逻辑：部分云端模型偶发卡住，增加超时取消以提高交互可用性
                     code = AutoWebAgentUtils.callLLMWithTimeout(() -> LLMUtil.chatWithMinimax(prompt), 180000L, uiLogger, "Minimax");
                     break;
                 case "QWEN_MAX":
@@ -570,6 +583,7 @@ class GroovySupport {
         }
 
         if (code != null) {
+            // 核心逻辑：兼容模型输出 ```groovy``` / ```java``` / ``` 代码块
             code = code.replaceAll("```groovy", "").replaceAll("```java", "").replaceAll("```", "").trim();
         }
         long elapsed = System.currentTimeMillis() - t0;

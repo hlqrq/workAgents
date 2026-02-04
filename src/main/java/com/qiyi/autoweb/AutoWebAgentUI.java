@@ -20,7 +20,17 @@ import static com.qiyi.autoweb.AutoWebAgent.*;
 
 /**
  * Swing 控制台 UI
- * 负责计划/代码生成、修正、执行的交互与多模型会话管理
+ * 负责计划/代码生成、修正、执行的交互与多模型会话管理。
+ *
+ * 核心职责：
+ * - 维护每个模型的会话状态（Plan/Steps/Code/执行结果），并将状态渲染到 Tab；
+ * - 串联 AutoWebAgent 的采集/LLM/执行能力，提供“生成计划 → 生成代码 → 修正 → 执行”的闭环；
+ * - 提供 PLAN_REFINE 的入口补全交互，以及（可选）视觉补充能力（截图 → 图片理解 → 页面描述）。
+ *
+ * 并发与线程模型：
+ * - UI 线程：仅做 Swing 渲染、按钮状态控制与用户输入；
+ * - 后台线程：按模型并发执行 LLM 请求/采集/执行；通过 uiEpoch 做“过期任务”中止保护；
+ * - Playwright 操作：使用 PLAYWRIGHT_LOCK 做串行化，避免跨线程同时操作浏览器导致不稳定。
  */
 class AutoWebAgentUI {
     private static JFrame AGENT_FRAME;
@@ -95,10 +105,13 @@ class AutoWebAgentUI {
         java.util.concurrent.atomic.AtomicReference<Page> rootPageRef = new java.util.concurrent.atomic.AtomicReference<>(rootPage);
         java.util.concurrent.atomic.AtomicReference<PlayWrightUtil.Connection> connectionRef = new java.util.concurrent.atomic.AtomicReference<>(connection);
 
+        // 是否执行过脚本：用于决定某些路径是否需要“强制新开页/重连”等保护策略
         java.util.concurrent.atomic.AtomicBoolean hasExecuted = new java.util.concurrent.atomic.AtomicBoolean(false);
         java.util.concurrent.atomic.AtomicBoolean forceNewPageOnExecute = new java.util.concurrent.atomic.AtomicBoolean(false);
         java.util.concurrent.atomic.AtomicLong uiEpoch = new java.util.concurrent.atomic.AtomicLong(0);
+        // 多模型会话：每个 modelName 一个 ModelSession（包含 plan/steps/snapshots/执行日志摘要等）
         java.util.concurrent.ConcurrentHashMap<String, ModelSession> sessionsByModel = new java.util.concurrent.ConcurrentHashMap<>();
+        // 多模型代码：每个 modelName 一个“最新代码文本”（Tab 展示与执行均从此读取）
         java.util.concurrent.ConcurrentHashMap<String, String> latestCodeByModel = new java.util.concurrent.ConcurrentHashMap<>();
         java.util.concurrent.ConcurrentHashMap<String, java.util.Set<Integer>> checkedPlanStepsByModel = new java.util.concurrent.ConcurrentHashMap<>();
         java.util.concurrent.ConcurrentHashMap<String, java.util.Map<Integer, Boolean>> stepStatusByModel = new java.util.concurrent.ConcurrentHashMap<>();
@@ -3217,6 +3230,19 @@ class AutoWebAgentUI {
         }
     }
 
+    /**
+     * 读取“当前最佳滚动容器”的滚动状态。
+     *
+     * - 当 window.__autowebBestScroller 是元素时，读取其 scrollTop/clientHeight/scrollHeight；
+     * - 否则按窗口滚动读取 window.scrollY/innerHeight/documentElement.scrollHeight。
+     *
+     * 返回值字段：
+     * - mode：el / win
+     * - tag：当 mode=el 时为 tagName
+     * - y：当前位置（scrollTop 或 scrollY）
+     * - ih：可视高度（clientHeight 或 innerHeight）
+     * - sh：总高度（scrollHeight）
+     */
     private static java.util.Map<String, Object> readBestScrollerState(Page page) {
         if (page == null) return java.util.Collections.emptyMap();
         try {
@@ -3282,6 +3308,7 @@ class AutoWebAgentUI {
                     return out;
                 }
 
+                // 选择“最佳滚动容器”：优先选 overflowY=auto/scroll 且 viewport 足够大、scrollHeight 明显大于 clientHeight 的容器
                 Object initObj = null;
                 try {
                     initObj = page.evaluate("() => {\n" +
