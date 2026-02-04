@@ -7,8 +7,6 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.qiyi.util.LLMUtil;
 import com.qiyi.util.PlayWrightUtil;
-import org.junit.jupiter.api.Assumptions;
-import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -23,14 +21,14 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
-public class MultiModelE2ETestModeTest {
+public class MultiModelAutoRun {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create();
 
     static class RunnerConfig {
         List<String> models = new ArrayList<>();
         List<CaseInput> cases = new ArrayList<>();
         AutoWebAgent.HtmlCaptureMode captureMode = AutoWebAgent.HtmlCaptureMode.ARIA_SNAPSHOT;
-        boolean useVisualSupplement = false;
+        boolean useVisualSupplement = true;
         boolean alsoStdout = true;
         boolean localAnalyze = false;
         String localAnalysisModel = LLMUtil.OLLAMA_MODEL_QWEN3_8B;
@@ -155,31 +153,6 @@ public class MultiModelE2ETestModeTest {
         String tail(int maxLines) {
             int n = Math.min(maxLines, lines.size());
             return String.join("\n", lines.subList(lines.size() - n, lines.size()));
-        }
-    }
-
-    @Test
-    public void runMultiModelE2E() throws Exception {
-        boolean enabled = Boolean.parseBoolean(System.getProperty("autoweb.e2e.enabled", "false"));
-        Assumptions.assumeTrue(enabled, "Set -Dautoweb.e2e.enabled=true to run the multi-model E2E test mode.");
-
-        RunnerConfig cfg = configFromSystemProperties();
-        Assumptions.assumeTrue(cfg.models != null && !cfg.models.isEmpty(), "Missing -Dautoweb.e2e.models");
-        Assumptions.assumeTrue(cfg.cases != null && !cfg.cases.isEmpty(), "Missing cases. Provide -Dautoweb.e2e.cases or -Dautoweb.e2e.casesFile");
-
-        Report report = runOnce(cfg);
-        String reportJson = GSON.toJson(toJson(report));
-        BufferingLogger rootLogger = new BufferingLogger("[E2E] ", cfg.alsoStdout);
-        String reportPath = StorageSupport.saveDebugArtifact(report.ts, "MULTI", "E2E", "multimodel_report", reportJson, rootLogger, cfg.reportMaxChars);
-        rootLogger.accept("Multi-model E2E report saved: " + (reportPath == null ? "" : reportPath));
-        printConsoleSummary(report, rootLogger);
-
-        if (cfg.localAnalyze) {
-            String analysisInput = buildCompactAnalysisInput(report);
-            String analysis = LLMUtil.chatWithOllama(analysisInput, cfg.localAnalysisModel, null, false);
-            report.localAnalysis = analysis == null ? "" : analysis;
-            String updated = GSON.toJson(toJson(report));
-            StorageSupport.saveDebugArtifact(report.ts, "MULTI", "E2E", "multimodel_report_with_local_analysis", updated, rootLogger, cfg.reportMaxChars);
         }
     }
 
@@ -754,7 +727,7 @@ public class MultiModelE2ETestModeTest {
         RunnerConfig cfg = new RunnerConfig();
         cfg.models = new ArrayList<>();
         cfg.captureMode = AutoWebAgent.HtmlCaptureMode.ARIA_SNAPSHOT;
-        cfg.useVisualSupplement = false;
+        cfg.useVisualSupplement = true;
         cfg.alsoStdout = true;
         cfg.localAnalyze = false;
         cfg.localAnalysisModel = LLMUtil.OLLAMA_MODEL_QWEN3_8B;
